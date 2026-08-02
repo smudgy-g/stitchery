@@ -1,0 +1,25 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.141.1",
+    "lxml>=6.1.1",
+    "numpy>=2.5.1",
+    "pillow>=12.3.0",
+    "pyembroidery>=1.5.1",
+    "scikit-image>=0.26.0",
+    "vtracer>=0.6.15",
+]
+
+[project.scripts]
+server = "server:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
