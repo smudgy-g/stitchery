@@ -1,0 +1,3 @@
+overrides:
+  # Pinned below 2.11.10 until it clears pnpm's minimumReleaseAge policy.
+  baseline-browser-mapping: 2.11.9

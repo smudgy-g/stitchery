@@ -69,24 +69,65 @@ allowed at all, are clearly marked best-effort.
 | Concern | How | Why borrowed / built |
 | --- | --- | --- |
 | Raster → vector | **VTracer** (Rust core, Python binding; MIT/Apache) | Curve-fitting + colour clustering is a solved deep problem; MIT license is clean for hosting. |
-| Vector → stitches | **Ink/Stitch** + **pystitch** (GPL-3.0) | Fill/satin/underlay/routing is decades of craft; not worth reimplementing. |
+| Vector → stitches | **Ink/Stitch** (GPL-3.0), as a vendored binary | Fill/satin/underlay/routing is decades of craft; not worth reimplementing. |
 | Stitch file encode/decode | **pyembroidery** (pure Python) | Format-agnostic read/write of PES/DST/JEF/VP3/etc. Pure Python → installs in the app venv. |
 | Perceptual quantize → thread palette | **Built** | The core embroidery-specific value. Decides thread-change count and result quality. |
 | Feature-size cleanup, fill/stroke classification, `inkstitch:` tagging | **Built** | The app's real intellectual work. |
 | UI + stitch preview | **Built** | Portfolio centrepiece. |
 
-### One container, two virtualenvs
+### One container, one venv + one sealed binary
 
-Ink/Stitch pins **Python 3.11** with finicky locked deps. Do not let that pin infect
-the rest of the app.
+*Revised after bullet 0 — the original plan assumed a second pinned virtualenv. It isn't
+needed.*
 
-- **`.venv-app`** (modern Python): FastAPI, upload handling, quantize→palette
+Ink/Stitch ships as a **PyInstaller bundle with its own vendored Python 3.11** and its own
+copies of numpy, Pillow, lxml, shapely, wx and GTK. There is nothing to pip-install and no
+second venv to manage.
+
+- **`.venv`** (modern Python, currently 3.14): FastAPI, upload handling, quantize→palette
   (numpy / Pillow / scikit-image), VTracer trace, `lxml` SVG tagging, **pyembroidery**
   read-back for the preview.
-- **`.venv-inkstitch`** (Python 3.11, pinned): Ink/Stitch + pystitch, nothing else.
+- **Ink/Stitch**: a single ~19MB executable plus its bundle directory, installed as a system
+  package. Invoked as a **subprocess**; nothing about it is importable from the app.
 
-The app venv shells out to the inkstitch venv as a **subprocess**. That subprocess call
-is the *only* thing that crosses into 3.11.
+The isolation is therefore stronger than planned and free: the 3.11 interpreter, the GPL
+code, and its dependency tree are all sealed inside that executable.
+
+### Verified integration facts
+
+Established by hand in bullet 0 — treat these as ground truth, not assumptions.
+
+- **Install:** `inkstitch` 3.2.2 from the AUR. Depends only on `inkscape`. Installs to
+  `/usr/share/inkscape/extensions/inkstitch/`, with the executable at `bin/inkstitch`
+  (world-executable — no `sudo` needed, and using `sudo` only creates root-owned output).
+- **Invocation:** one binary dispatches every extension. The `.inx` files under `inx/`
+  declare the contract; `<param>` entries map to `--name=value` flags:
+
+  ```
+  /usr/share/inkscape/extensions/inkstitch/bin/inkstitch \
+      --extension=output --format=pes design.svg > design.pes
+  ```
+
+- **Output goes to stdout as binary.** Always redirect; never decode. Exit code is
+  unreliable — validate the *output* (nonzero size, parses as PES, stitch count > 0).
+- **`--format=` is a free knob**: `pes`, `dst`, `jef`, `vp3`, `exp`, … same command. Multi-
+  format output is a dropdown, not a feature.
+- **PES version emitted is 1** (`pattern.extras['version']`). Oldest and most widely
+  readable dialect — the best case for an older Brother. No CLI param exposes the version,
+  so if the VE2300 rejects v1 the escape hatch is re-encoding from the `EmbPattern` with
+  pyembroidery.
+- **Units:** an SVG with `width="60mm"` and `viewBox="0 0 60 60"` gives 1 user unit = 1mm,
+  and pyembroidery reports coordinates in **tenths of a mm** (a 40mm square reads as bounds
+  `(0, 0, 400, 400)`). Exactly ×10, no fudge factors.
+- **`inkstitch:*` params are optional for a basic fill.** A plain `<rect>` with `fill` set
+  and no Ink/Stitch attributes at all stitches as a fill. Raw shapes work; no
+  Object-to-Path needed. Minimal tagging for bullet 1 is therefore "ensure `fill` is set,
+  `stroke` is none" — real params become a bullet 4 optimisation.
+- **Stroke leaks a thread.** Every filled object becomes its own colour block, so a stray
+  shape or a stroked outline silently adds a thread change.
+- **No display needed** for the output extension — it ran headless with empty stderr,
+  despite the bundle carrying wx/GTK. Extensions with UI (params dialogs, simulator) do
+  need X and bundle Flask; avoid those from the server.
 
 ### Data flow
 
@@ -100,9 +141,9 @@ FastAPI (.venv-app)
   perceptual quantize → thread palette          [numpy / Pillow / skimage]   ← built
   VTracer trace → layered SVG                    [vtracer python binding]     ← borrowed
   tag paths: inkstitch:* params, colours, order  [lxml]                       ← built
-      │  subprocess: tagged.svg ───────────────►  .venv-inkstitch (3.11)
-      │                                              Ink/Stitch → design.pes  ← borrowed
-      │  ◄──────────────────────  design.pes  ───────┘
+      │  subprocess: tagged.svg ───────────────►  bin/inkstitch (vendored 3.11)
+      │                                              Ink/Stitch → PES on stdout ← borrowed
+      │  ◄─────────────────────  stdout bytes  ──────┘
   read design.pes → stitch-coordinate JSON       [pyembroidery]              ← built glue
   return { previewStitches: [...], pesUrl, warnings }
       │
@@ -130,10 +171,11 @@ else changes. Don't pay for that split until something forces it.
 
 | Risk | Mitigation |
 | --- | --- |
-| **Machine won't read the output** (the least-controllable link) | **Tracer bullet 0:** hand-built PES onto the actual VE2300 *before* building anything upstream. |
+| **Machine won't read the output** (the least-controllable link) | **Tracer bullet 0:** hand-built PES onto the actual VE2300 *before* building anything upstream. **Still open** — no machine access until the owner is back. Partially derisked: PES v1 is emitted, and the file round-trips through an independent reader (pyembroidery) with correct bounds, thread count and stitch count. Fixture + expected numbers are committed, so the sew is a five-minute check. |
 | Photo inputs look terrible | Scope MVP to line art / logos / patterns; mark photos best-effort or reject. |
-| GPL-3.0 (Ink/Stitch) contaminating the product | Isolate in its own venv/subprocess; hosting a service ≠ distributing a binary. Revisit only if shipping a downloadable bundle. |
-| Python 3.11 pin breaking the app | Two-venv split; app code never runs under 3.11. |
+| GPL-3.0 (Ink/Stitch) contaminating the product | Sealed in a separate executable, called by subprocess; nothing is imported. Hosting a service ≠ distributing a binary. Revisit only if shipping a downloadable bundle. |
+| Python 3.11 pin breaking the app | Non-issue: the 3.11 interpreter is vendored inside the Ink/Stitch bundle. App code never sees it. |
+| **Dev and prod install different Ink/Stitch artifacts** | Dev uses the Arch/AUR package; the Dockerfile targets Debian and a `.deb` that was never verified. Pick one artifact and use it in both, or you'll debug two Ink/Stitch installs instead of one. |
 | "Looks fine on screen, sews badly" | Surface Ink/Stitch density / troubleshoot output as preview warnings (fast-follow). |
 | Public upload endpoint abuse | Deferred to the hardening bullet; private-first until then. |
 
@@ -143,25 +185,43 @@ Philosophy: each bullet is a **thin vertical slice that touches every layer end-
 then later bullets *thicken* individual stages. Never build one layer "fully" in
 isolation. Get an ugly-but-complete path working, then improve fidelity.
 
-### Bullet 0 — Prove the pipe (no code, no web)
+### Bullet 0 — Prove the pipe (no code, no web)  *[in progress]*
 
 The single most important derisking step. By hand:
-1. Author one trivial tagged SVG (a filled rectangle with fill-stitch params).
-2. In a Python 3.11 venv, install Ink/Stitch and run the CLI to produce a PES.
-3. Put it on a USB stick, sew it on the VE2300.
+1. ~~Author one trivial SVG (a filled 40×40mm rectangle).~~ **Done.**
+2. ~~Install Ink/Stitch and run the CLI to produce a PES.~~ **Done** — see *Verified
+   integration facts*. Both documented traps confirmed real: binary stdout, unreliable
+   exit code.
+3. ~~Read the PES back independently and check it.~~ **Done** — pyembroidery reports bounds
+   `(0, 0, 400, 400)`, matching the 40×40mm drawn.
+4. **Blocked:** put it on a USB stick, sew it on the VE2300.
 
-**Done when:** the machine stitches your rectangle. Everything else assumes this works;
-prove it first. Watch for the documented CLI traps (exit code 0 on failure, binary
-stdout).
+Committed as a fixture (`rect40.svg` + `rect40.pes`) with expected bounds, thread count and
+stitch count recorded alongside, so it doubles as a regression test.
+
+**Sew-day checklist** (one shot, prep in advance):
+- Stick carries the fixture PES.
+- Written expectations: 40×40mm, 1 thread, known stitch count — so "it sewed" and "it sewed
+  *correctly*" are distinguishable.
+- Photograph the result next to a ruler; that's the scale check bullet 3 needs.
+
+**Done when:** the machine stitches the rectangle at the right size.
+
+**Sizing lesson worth keeping:** the first attempt was 170×139mm with two colours →
+76,487 stitches, a ~2 hour sew. Stitch count scales with *area*. Keep test designs small
+and single-colour, or you'll burn an afternoon per iteration.
 
 ### Bullet 1 — Walking skeleton (every layer, zero fidelity)
 
 - React: single upload button → POST to FastAPI → render whatever comes back on a canvas
   → download button.
 - FastAPI: crude fixed quantization (e.g. naive 4-colour), VTracer with default params →
-  SVG, minimal fill-only tagging (one hardcoded param set), subprocess → Ink/Stitch →
-  PES, read back with pyembroidery → stitch-coord JSON, return `{ previewStitches, pesUrl }`.
-- Container: both venvs wired; the subprocess call works.
+  SVG, minimal tagging (set `fill`, clear `stroke` — params not required, see bullet 0),
+  subprocess → Ink/Stitch → PES on stdout, read back with pyembroidery → stitch-coord JSON,
+  return `{ previewStitches, pesUrl }`.
+- Subprocess wrapper: capture stdout as bytes, capture stderr separately and log it, enforce
+  a timeout, and validate success from the output rather than the exit code.
+- Container: Ink/Stitch installed and callable; the subprocess call works.
 
 **Done when:** you upload any simple image and get a downloadable PES plus a rough
 on-canvas stitch preview. Output quality irrelevant. **This is the architecture proven.**
@@ -204,8 +264,9 @@ on-canvas stitch preview. Output quality irrelevant. **This is the architecture 
 ### Bullet 6 — Multi-format output (thicken: encode)
 
 - Format dropdown (PES default; DST as universal fallback; JEF/VP3/EXP).
-- Branch on extension: either let Ink/Stitch emit it (`--format-*=True`) or re-write from
-  the `EmbPattern` you already read back with pyembroidery.
+- Mostly already free: swap the `--format=` value on the same command (confirmed in bullet 0).
+  Alternative path is re-writing from the `EmbPattern` you already read back with pyembroidery
+  — worth keeping for formats Ink/Stitch handles poorly, or if PES version ever needs forcing.
 - **Caveat:** DST doesn't store thread colours natively — don't treat DST round-trips as
   lossless.
 
