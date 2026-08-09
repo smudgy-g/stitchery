@@ -1,0 +1,10 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment and IDE files (optional but recommended)
+.env
+venv/
+.venv/
+.pytest_cache/

@@ -45,17 +45,29 @@ function App() {
     <>
       <section>
         <h1>Embroidery</h1>
+        <aside>
+          <label htmlFor="numColors">
+            Number of colours:
+            <select name="numColors" id="numColors" defaultValue={5}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((num) => (
+                <option key={`${num}-colors`} value={num}>
+                  {num}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button onClick={handleUpload} disabled={!file || isLoading}>
+            {isLoading ? "Uploading..." : "Upload"}
+          </button>
+          <DownloadButton base64Content={base64File} disabled={!preview} />
+        </aside>
         <FileUploader onFileSelect={handleFileChange} previewUrl={previewUrl} />
-        <button onClick={handleUpload} disabled={!file || isLoading}>
-          {isLoading ? "Uploading..." : "Upload"}
-        </button>
 
         {error && <p className="error">{error}</p>}
 
         <div>
           {preview && (
             <>
-              <DownloadButton base64Content={base64File} />
               <StitchPreview preview={preview} bounds={bounds} />
             </>
           )}

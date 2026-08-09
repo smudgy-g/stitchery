@@ -4,12 +4,13 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-import pyembroidery as pe
+import pystitch
 import vtracer
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 
+from app.preprocess import quantize_for_embroidery
 from app.stitcher import svg_to_pes
 from app.tagging import tag_svg
 
@@ -26,19 +27,19 @@ app.add_middleware(
 )
 
 
-def get_background_rgb(img: Image.Image) -> tuple[int, int, int]:
+def get_background_hex(img: Image.Image) -> str:
+    """Samples four corners of the pre-quantized image to determine background hex."""
     rgb_img = img.convert("RGB")
     w, h = rgb_img.size
 
-    # Sample the four corners
     corners = [
         rgb_img.getpixel((0, 0)),
         rgb_img.getpixel((w - 1, 0)),
         rgb_img.getpixel((0, h - 1)),
         rgb_img.getpixel((w - 1, h - 1)),
     ]
-
-    return Counter(corners).most_common(1)[0][0]
+    bg_rgb = Counter(corners).most_common(1)[0][0]
+    return f"#{bg_rgb[0]:02x}{bg_rgb[1]:02x}{bg_rgb[2]:02x}"
 
 
 @app.get("/")
@@ -47,7 +48,12 @@ async def root():
 
 
 @app.post("/upload")
-async def upload_file(file: UploadFile):
+async def upload_file(
+    file: UploadFile,
+    num_colors: int = Query(
+        default=5, ge=2, le=12, description="Target thread color count"
+    ),
+):
     try:
         img = Image.open(file.file)
     except UnidentifiedImageError:
@@ -56,20 +62,22 @@ async def upload_file(file: UploadFile):
             detail="Unsupported file. Upload a raster image (png, jpeg, webp).",
         )
 
-    rgba = img.convert("RGBA")
-    flat = Image.new("RGB", rgba.size, (255, 255, 255))
-    flat.paste(rgba, mask=rgba.getchannel("A"))
-    quantized = flat.convert("P", palette=Image.ADAPTIVE, colors=NUM_COLORS)
+    flat_img, used_threads = quantize_for_embroidery(
+        img,
+        num_colors=num_colors,
+    )
 
-    bg_rgb = get_background_rgb(quantized)
+    bg_hex = get_background_hex(flat_img)
 
     buf = io.BytesIO()
-    quantized.save(buf, "PNG")
-    palette = quantized.getpalette()
+    flat_img.save(buf, "PNG")
 
-    svg_str: str = vtracer.convert_raw_image_to_svg(buf.getvalue(), "png")
+    svg_str: str = vtracer.convert_raw_image_to_svg(
+        buf.getvalue(),
+        "png",
+    )
 
-    tagged_svg = tag_svg(svg_str, palette, bg_rgb=bg_rgb, palette_colors=NUM_COLORS)
+    tagged_svg = tag_svg(svg_str, bg_hex=bg_hex, max_mm=80.0)
 
     pes = svg_to_pes(tagged_svg)
 
@@ -78,7 +86,7 @@ async def upload_file(file: UploadFile):
         with open(pes_path, "wb") as pf:
             pf.write(pes)
 
-        pattern = pe.read_pes(str(pes_path))
+        pattern = pystitch.read_pes(str(pes_path))
         color_blocks = list(pattern.get_as_colorblocks())
 
         with open(pes_path, "rb") as f:
@@ -102,5 +110,6 @@ async def upload_file(file: UploadFile):
             "maxX": max_x,
             "maxY": max_y,
         },
-        "file_base64": pes_base64
+        "file_base64": pes_base64,
+        "threads": used_threads,
     }

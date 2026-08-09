@@ -33,7 +33,7 @@ interface UseFileUploadReturn {
   resetFileUpload: () => void;
 }
 
-export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
+export function useFileUpload(uploadUrl: string, numColors: number = 5): UseFileUploadReturn {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [base64File, setBase64File] = useState<any | null>(null);
   const [preview, setPreview] = useState<UploadResponse["preview"]>(null);
@@ -45,6 +45,7 @@ export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("num_colors", String(numColors))
 
     try {
       setIsLoading(true);
