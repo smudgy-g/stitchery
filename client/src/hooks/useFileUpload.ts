@@ -29,28 +29,46 @@ interface UseFileUploadReturn {
     maxX: number;
     maxY: number;
   } | null;
-  uploadFile: (file: File) => Promise<void>;
+  uploadFile: (
+    file: File,
+    options: {
+      numColors: number;
+      targetWidthMm: number;
+      hoopKey: string;
+    },
+  ) => Promise<void>;
   resetFileUpload: () => void;
 }
 
-export function useFileUpload(uploadUrl: string, numColors: number = 5): UseFileUploadReturn {
+export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [base64File, setBase64File] = useState<any | null>(null);
   const [preview, setPreview] = useState<UploadResponse["preview"]>(null);
   const [bounds, setBounds] = useState<UploadResponse["bounds"]>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = async (
+    file: File,
+    options: {
+      numColors: number;
+      targetWidthMm: number;
+      hoopKey: string;
+    },
+  ) => {
     if (!file) return;
+
+    const url = new URL(uploadUrl);
+    url.searchParams.set("num_colors", options.numColors.toString());
+    url.searchParams.set("target_width_mm", options.targetWidthMm.toString());
+    url.searchParams.set("hoop_key", options.hoopKey);
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("num_colors", String(numColors))
 
     try {
       setIsLoading(true);
 
-      const response = await fetch(uploadUrl, {
+      const response = await fetch(url.toString(), {
         method: "POST",
         body: formData,
       });
@@ -60,7 +78,7 @@ export function useFileUpload(uploadUrl: string, numColors: number = 5): UseFile
       }
 
       const data: UploadResponse = await response.json();
-      console.log(data);
+
       setBase64File(data.file_base64);
       setPreview(data.preview);
       setBounds(data.bounds);

@@ -249,6 +249,10 @@ on-canvas stitch preview. Output quality irrelevant. **This is the architecture 
 - Satin edges where appropriate; running stitch for thin lines.
 - Real `inkstitch:*` params: underlay, row spacing/density, fill angle, pull comp.
 - Set stitch order via SVG stacking order; add `trim` / `stop` object commands where useful.
+- Add React crop/scale controls to normalize uploaded images.
+- Implement strict $px \leftrightarrow mm$ conversion ($1\text{ px} = \frac{25.4}{\text{DPI}}\text{ mm}$) before passing geometry to vtracer and tag_svg.
+- Enforce a hard maximum bounding box (e.g., $100 \times 100\text{ mm}$ for standard Brother 4x4 hoops, or up to $200 \times 300\text{ mm}$).
+- Return a 400 Bad Request or frontend warning if scaled dimensions exceed maximum hoop limits.
 
 **Done when:** outputs sew cleanly (underlay present, sensible density, no obvious defects).
 

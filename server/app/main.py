@@ -14,7 +14,11 @@ from app.preprocess import quantize_for_embroidery
 from app.stitcher import svg_to_pes
 from app.tagging import tag_svg
 
-NUM_COLORS = 5
+HOOP_LIMITS = {
+    "brother_4x4": {"name": "Brother 4x4", "max_w": 100.0, "max_h": 100.0},
+    "brother_5x7": {"name": "Brother 5x7", "max_w": 130.0, "max_h": 180.0},
+    "brother_8x12": {"name": "Brother 8x12", "max_w": 200.0, "max_h": 300.0},
+}
 
 app = FastAPI()
 
@@ -53,7 +57,16 @@ async def upload_file(
     num_colors: int = Query(
         default=5, ge=2, le=12, description="Target thread color count"
     ),
+    target_width_mm: float = Query(
+        default=80.0, ge=10.0, le=300.0, description="Target width in mm"
+    ),
+    hoop_key: str = Query(
+        default="brother_4x4", description="Selected hoop preset key"
+    ),
 ):
+    print(
+        f"Query Params Received: num_colors={num_colors}, width={target_width_mm}mm, hoop={hoop_key}"
+    )
     try:
         img = Image.open(file.file)
     except UnidentifiedImageError:
@@ -62,6 +75,23 @@ async def upload_file(
             detail="Unsupported file. Upload a raster image (png, jpeg, webp).",
         )
 
+    if hoop_key not in HOOP_LIMITS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown hoop selection '{hoop_key}'.",
+        )
+
+    hoop = HOOP_LIMITS[hoop_key]
+
+    max_dimension = max(hoop["max_w"], hoop["max_h"])
+    if target_width_mm > max_dimension:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Target width ({target_width_mm:.0f}mm) exceeds the maximum "
+                f"capacity for {hoop['name']} ({max_dimension:.0f}mm)."
+            ),
+        )
     flat_img, used_threads = quantize_for_embroidery(
         img,
         num_colors=num_colors,
