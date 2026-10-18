@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 import pystitch
+from pystitch.EmbConstant import STITCH
 import vtracer
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +25,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,13 +84,19 @@ async def upload_file(
 
     hoop = HOOP_LIMITS[hoop_key]
 
-    max_dimension = max(hoop["max_w"], hoop["max_h"])
-    if target_width_mm > max_dimension:
+    # max_dimension = max(hoop["max_w"], hoop["max_h"])
+    # if target_width_mm > max_dimension:
+
+    source_width_px, source_height_px = img.size
+    target_height_mm = target_width_mm * source_height_px / source_width_px
+
+    if target_width_mm > hoop["max_w"] or target_height_mm > hoop["max_h"]:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Target width ({target_width_mm:.0f}mm) exceeds the maximum "
-                f"capacity for {hoop['name']} ({max_dimension:.0f}mm)."
+                f"Design size {target_width_mm:.1f} x {target_height_mm:.1f}mm "
+                f"exceeds the {hoop['name']} hoop limit of "
+                f"{hoop['max_w']:.1f} x {hoop['max_h']:.1f}mm."
             ),
         )
     flat_img, used_threads = quantize_for_embroidery(
@@ -107,7 +114,12 @@ async def upload_file(
         "png",
     )
 
-    tagged_svg = tag_svg(svg_str, bg_hex=bg_hex, max_mm=80.0)
+    tagged_svg = tag_svg(
+        svg_str,
+        bg_hex=bg_hex,
+        target_width_mm=target_width_mm,
+        target_height_mm=target_height_mm,
+    )
 
     pes = svg_to_pes(tagged_svg)
 
@@ -116,7 +128,12 @@ async def upload_file(
         with open(pes_path, "wb") as pf:
             pf.write(pes)
 
-        pattern = pystitch.read_pes(str(pes_path))
+        try:
+            pattern = pystitch.read_pes(str(pes_path))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Stitch generation returned invalid PES.") from exc
+        if not pattern or not any(command == STITCH for _, _, command in pattern.stitches):
+            raise HTTPException(status_code=502, detail="Stitch generation returned no stitches.")
         color_blocks = list(pattern.get_as_colorblocks())
 
         with open(pes_path, "rb") as f:

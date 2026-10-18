@@ -1,5 +1,7 @@
 import subprocess
 import tempfile
+import os
+from pathlib import Path
 
 
 def svg_to_pes(svg_bytes: bytes) -> bytes:
@@ -9,9 +11,17 @@ def svg_to_pes(svg_bytes: bytes) -> bytes:
         with open(svg_path, "wb") as f:
             f.write(svg_bytes)
 
+        inkstitch_bin = os.environ.get(
+            "INKSTITCH_BIN",
+            "/usr/share/inkscape/extensions/inkstitch/bin/inkstitch",
+        )
+
+        if not Path(inkstitch_bin).is_file():
+            raise RuntimeError(f"Ink/Stitch executable not found at {inkstitch_bin}")
+
         result = subprocess.run(
             [
-                "/usr/share/inkscape/extensions/inkstitch/bin/inkstitch",
+                inkstitch_bin,
                 "--extension=output",
                 "--format=pes",
                 svg_path,

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 
 interface Props {
-  svg?: any;
   preview: Array<{ color: string; stitches: Array<[number, number, number]> }>;
   bounds: {
     widthUnits: number;
@@ -13,16 +12,17 @@ interface Props {
   };
 }
 
-function StitchPreview({ svg, preview, bounds }: Props) {
+function StitchPreview({ preview, bounds }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (preview) {
       const canvas = canvasRef.current;
+      if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const { heightUnits, widthUnits, minX, maxX, minY, maxY } = bounds;
+      const { heightUnits, widthUnits, minX, minY } = bounds;
       const scale = Math.min(
         canvas.width / widthUnits,
         canvas.height / heightUnits,
@@ -49,10 +49,6 @@ function StitchPreview({ svg, preview, bounds }: Props) {
       }
     }
   }, [preview, bounds]);
-  return (
-    <>
-      <canvas ref={canvasRef} width={600} height={600} />
-    </>
-  );
+  return <canvas ref={canvasRef} width={600} height={600} className="block h-auto w-full" role="img" aria-label="Generated embroidery stitch preview" />;
 }
 export default StitchPreview;

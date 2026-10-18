@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 interface UploadResponse {
-  file_base64: any;
+  file_base64: string;
   preview: Array<{ color: string; stitches: Array<[number, number, number]> }>;
   bounds: {
     widthUnits: number;
@@ -15,20 +15,13 @@ interface UploadResponse {
 
 interface UseFileUploadReturn {
   isLoading: boolean;
-  base64File: any;
+  base64File: string | null;
   preview: Array<{
     color: string;
     stitches: Array<[number, number, number]>;
   }> | null;
   error: string | null;
-  bounds: {
-    widthUnits: number | null;
-    heightUnits: number | null;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-  } | null;
+  bounds: UploadResponse["bounds"] | null;
   uploadFile: (
     file: File,
     options: {
@@ -41,10 +34,11 @@ interface UseFileUploadReturn {
 }
 
 export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
+  const requestId = useRef(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [base64File, setBase64File] = useState<any | null>(null);
-  const [preview, setPreview] = useState<UploadResponse["preview"]>(null);
-  const [bounds, setBounds] = useState<UploadResponse["bounds"]>(null);
+  const [base64File, setBase64File] = useState<string | null>(null);
+  const [preview, setPreview] = useState<UploadResponse["preview"] | null>(null);
+  const [bounds, setBounds] = useState<UploadResponse["bounds"] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const uploadFile = async (
@@ -56,6 +50,7 @@ export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
     },
   ) => {
     if (!file) return;
+    const id = ++requestId.current;
 
     const url = new URL(uploadUrl);
     url.searchParams.set("num_colors", options.numColors.toString());
@@ -74,25 +69,29 @@ export function useFileUpload(uploadUrl: string): UseFileUploadReturn {
       });
 
       if (!response.ok) {
-        throw new Error(`Upload failed with status: ${response.status}`);
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.detail === "string" ? body.detail : `Upload failed (${response.status})`);
       }
 
       const data: UploadResponse = await response.json();
+      if (id !== requestId.current) return;
 
       setBase64File(data.file_base64);
       setPreview(data.preview);
       setBounds(data.bounds);
     } catch (err) {
+      if (id !== requestId.current) return;
       const errorMessage =
         err instanceof Error ? err.message : "An unexpected error occurred";
       setError(errorMessage);
       console.error(err);
     } finally {
-      setIsLoading(false);
+      if (id === requestId.current) setIsLoading(false);
     }
   };
 
   const resetFileUpload = () => {
+    requestId.current++;
     setBase64File(null);
     setError(null);
     setPreview(null);

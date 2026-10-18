@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -)",
+      "Bash(python3.11 --version)",
+      "Bash(uv run python -c ' *)",
+      "Bash(grep -v '^$')"
+    ]
+  }
+}

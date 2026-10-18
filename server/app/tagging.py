@@ -40,22 +40,22 @@ def spans_canvas(
 def tag_svg(
     svg_str: str,
     bg_hex: str | None = None,
-    max_mm: float = 80.0,
+    target_width_mm: float = 80.0,
+    target_height_mm: float = 80.0,
 ) -> bytes:
     """Prepares VTracer SVG for stitch generation:
     1. Rescales dimensions from px to physical mm units.
     2. Strips background canvas path if detected.
-    3. Groups and sorts paths by fill color to minimize thread color changes.
+    3. Keeps the trace's paint order so overlapping colours stay visible.
     """
     root = etree.fromstring(svg_str.encode())
 
     # Scale SVG canvas from pixels to physical millimeters
     w_px = float(root.get("width"))
     h_px = float(root.get("height"))
-    scale = max_mm / max(w_px, h_px)
 
-    w_mm = w_px * scale
-    h_mm = h_px * scale
+    w_mm = target_width_mm
+    h_mm = target_height_mm
 
     root.set("viewBox", f"0 0 {w_px} {h_px}")
     root.set("width", f"{w_mm}mm")
@@ -80,12 +80,7 @@ def tag_svg(
                 paths_to_keep.append(p)
         paths = paths_to_keep
 
-    # Group and sort paths by fill color (groups identical threads together)
-    paths.sort(key=lambda p: p.get("fill") or "")
-
-    # Re-append paths in sorted order
     for p in paths:
-        root.append(p)
         p.set("stroke", "none")
 
     return etree.tostring(root)

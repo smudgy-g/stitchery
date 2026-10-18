@@ -1,126 +1,189 @@
-import { useState, useEffect, useMemo } from "react";
-import "./App.css";
+import { useState } from "react";
+import { ArrowRight, Check, ChevronDown, CircleHelp, Layers3, Scissors, SlidersHorizontal, Sparkles } from "lucide-react";
 import FileUploader from "./components/FileUploader";
 import StitchPreview from "./components/StitchPreview";
-import { useFileUpload } from "./hooks/useFileUpload";
 import DownloadButton from "./components/DownloadButton";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { useFileUpload } from "./hooks/useFileUpload";
 
 const HOOP_PRESETS = {
-  brother_4x4: { name: "Brother 4x4 (100 × 100 mm)", maxW: 100, maxH: 100 },
-  brother_5x7: { name: "Brother 5x7 (130 × 180 mm)", maxW: 130, maxH: 180 },
-  brother_8x12: { name: "Brother 8x12 (200 × 300 mm)", maxW: 200, maxH: 300 },
+  brother_4x4: { name: "Brother 4 × 4", maxW: 100, maxH: 100 },
+  brother_5x7: { name: "Brother 5 × 7", maxW: 130, maxH: 180 },
+  brother_8x12: { name: "Brother 8 × 12", maxW: 200, maxH: 300 },
 } as const;
 
 type HoopKey = keyof typeof HOOP_PRESETS;
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
-  const [numColors, setNumColors] = useState<number>(5);
+  const [numColors, setNumColors] = useState(5);
   const [selectedHoop, setSelectedHoop] = useState<HoopKey>("brother_4x4");
-  const [targetWidthMm, setTargetWidthMm] = useState<number>(80);
+  const [targetWidthMm, setTargetWidthMm] = useState(80);
+  const { preview, bounds, isLoading, uploadFile, error, resetFileUpload, base64File } =
+    useFileUpload(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/upload");
 
-  const {
-    preview,
-    bounds,
-    isLoading,
-    uploadFile,
-    error,
-    resetFileUpload,
-    base64File,
-  } = useFileUpload("http://127.0.0.1:8000/upload");
-
-  const previewUrl = useMemo(() => {
-    if (!file) return null;
-
-    const objectUrl = URL.createObjectURL(file);
-    return objectUrl;
-  }, [file]);
-
-  useEffect(() => {
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
-
-  const handleFileChange = (file: File) => {
-    setFile(file);
+  const handleFileChange = (nextFile: File | null) => {
+    setFile(nextFile);
+    resetFileUpload();
   };
 
-  const handleUpload = () => {
-    resetFileUpload();
+  const widthValid = Number.isFinite(targetWidthMm) && targetWidthMm >= 10 && targetWidthMm <= HOOP_PRESETS[selectedHoop].maxW;
+  const stitchCount = preview?.reduce((sum, block) => sum + block.stitches.filter(([, , cmd]) => cmd === 0).length, 0);
 
-    if (file) {
-      uploadFile(file, {
-        numColors,
-        targetWidthMm,
-        hoopKey: selectedHoop,
-      });
-    }
+  const handleGenerate = () => {
+    if (!file || !widthValid || isLoading) return;
+    resetFileUpload();
+    void uploadFile(file, { numColors, targetWidthMm, hoopKey: selectedHoop });
   };
 
   return (
-    <>
-      <section>
-        <h1>Embroidery</h1>
-        <aside>
-          <label htmlFor="numColorSelect">
-            Number of colours:
-            <select
-              name="numColors"
-              id="numColorSelect"
-              value={numColors}
-              onChange={(e) => setNumColors(Number(e.target.value))}
-            >
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((num) => (
-                <option key={`${num}-colors`} value={num}>
-                  {num}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor="hoopSelect">
-            Hoop:
-            <select
-              name="hoopSelect"
-              id="hoopSelect"
-              value={selectedHoop}
-              onChange={(e) => setSelectedHoop(e.target.value as HoopKey)}
-            >
-              {Object.entries(HOOP_PRESETS).map(([key, hoop]) => (
-                <option key={key} value={key}>
-                  {hoop.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor="targetWidth">
-            Target Width (mm):
-            <input
-              type="number"
-              id="targetWidth"
-              value={targetWidthMm}
-              min={10}
-              max={HOOP_PRESETS[selectedHoop].maxW}
-              onChange={(e) => setTargetWidthMm(Number(e.target.value))}
-            />
-          </label>
-        </aside>
-        <FileUploader onFileSelect={handleFileChange} />
-
-        {error && <p className="error">{error}</p>}
-
-        <button onClick={handleUpload} disabled={!file || isLoading}>
-          {isLoading ? "Uploading..." : "Upload"}
-        </button>
-        <DownloadButton base64Content={base64File} disabled={!preview} />
-
-        <div>
-          {preview && (
-            <>
-              <StitchPreview preview={preview} bounds={bounds} />
-            </>
-          )}
+    <div className="min-h-screen bg-white text-gray-950">
+      <header className="border-b border-gray-200">
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between border-x border-gray-200 px-5 py-4 sm:px-10">
+          <a href="#top" className="flex items-center gap-2.5 text-base font-semibold tracking-tight" aria-label="Stitchery home">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-sky-500 text-white"><Scissors aria-hidden="true" className="size-4" /></span>
+            stitchery<span className="text-sky-500">.</span>
+          </a>
+          <div className="flex items-center gap-3 text-xs sm:gap-6">
+            <a href="#studio" className="font-medium text-gray-600 hover:text-gray-950">The studio</a>
+            <span className="hidden h-4 w-px bg-gray-200 sm:block" />
+            <span className="hidden items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-gray-500 sm:flex"><span className="size-1.5 rounded-full bg-sky-500" /> Image to embroidery</span>
+          </div>
         </div>
-      </section>
-    </>
+      </header>
+
+      <main id="top" className="page-grid mx-auto max-w-[1200px] border-x border-gray-200">
+        <div className="px-5 sm:px-10">
+          <section className="border-b border-gray-200 pb-10 pt-14 sm:pb-14 sm:pt-20">
+            <div className="mb-6 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-sky-600">
+              <span className="h-px w-7 bg-sky-500" /> The digital embroidery studio / 001
+            </div>
+            <h1 className="max-w-4xl text-[clamp(3rem,7vw,5.6rem)] font-medium leading-[1.02] tracking-[-0.065em] text-gray-950">
+              Your image, <br /><span className="text-gray-400">made of stitches.</span>
+            </h1>
+            <div className="mt-7 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+              <p className="max-w-xl text-base leading-7 text-gray-600 sm:text-lg">
+                Turn simple artwork into a machine-ready embroidery file. Crop, choose your threads, and see the stitches before you sew.
+              </p>
+              <a href="#studio" className="inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-sky-600 hover:text-sky-700">
+                Start creating <ArrowRight aria-hidden="true" className="size-4" />
+              </a>
+            </div>
+          </section>
+
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-gray-200 py-5 font-mono text-[11px] uppercase tracking-wider text-gray-500 sm:gap-x-10">
+            <span className="flex items-center gap-2"><span className="text-sky-600">01</span> Add your artwork</span>
+            <ArrowRight aria-hidden="true" className="hidden size-3 text-gray-300 sm:block" />
+            <span className="flex items-center gap-2"><span className="text-sky-600">02</span> Set the details</span>
+            <ArrowRight aria-hidden="true" className="hidden size-3 text-gray-300 sm:block" />
+            <span className="flex items-center gap-2"><span className="text-sky-600">03</span> Preview & download</span>
+          </div>
+
+          <section id="studio" aria-labelledby="studio-heading" className="pb-16 pt-10 sm:pb-24 sm:pt-14">
+            <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.16em] text-sky-600">Workspace / new design</p>
+                <h2 id="studio-heading" className="text-3xl font-medium tracking-[-0.045em] sm:text-4xl">Make something worth keeping.</h2>
+              </div>
+              <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-gray-500">PES · Brother format</span>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)] lg:items-start">
+              <div className="space-y-5">
+                <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_6px_24px_-16px_rgba(15,23,42,0.2)]">
+                  <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-4">
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600"><Scissors aria-hidden="true" className="size-4" /></span>
+                    <div><h3 className="text-sm font-semibold">01 / Your artwork</h3><p className="text-xs text-gray-500">A clear logo, drawing, or pattern works best.</p></div>
+                  </div>
+                  <div className="p-5"><FileUploader onFileSelect={handleFileChange} confirmed={!!file} /></div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_6px_24px_-16px_rgba(15,23,42,0.2)]">
+                  <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-4">
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700"><SlidersHorizontal aria-hidden="true" className="size-4" /></span>
+                    <div><h3 className="text-sm font-semibold">02 / Design settings</h3><p className="text-xs text-gray-500">Fit your hoop and choose the thread count.</p></div>
+                  </div>
+                  <div className="space-y-5 p-5">
+                    <div>
+                      <label htmlFor="hoopSelect" className="mb-2 block text-xs font-semibold text-gray-700">Embroidery hoop</label>
+                      <div className="relative">
+                        <select id="hoopSelect" value={selectedHoop} onChange={(e) => {
+                          const key = e.target.value as HoopKey;
+                          setSelectedHoop(key);
+                          setTargetWidthMm((width) => Math.min(width, HOOP_PRESETS[key].maxW));
+                          resetFileUpload();
+                        }} className="h-10 w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 pr-9 text-sm text-gray-950 outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/20">
+                          {Object.entries(HOOP_PRESETS).map(([key, hoop]) => <option key={key} value={key}>{hoop.name} — {hoop.maxW} × {hoop.maxH} mm</option>)}
+                        </select>
+                        <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-3 size-4 text-gray-500" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="targetWidth" className="mb-2 block text-xs font-semibold text-gray-700">Width <span className="font-normal text-gray-400">/ mm</span></label>
+                        <Input type="number" id="targetWidth" value={targetWidthMm} min={10} max={HOOP_PRESETS[selectedHoop].maxW} onChange={(e) => { setTargetWidthMm(Number(e.target.value)); resetFileUpload(); }} aria-invalid={!widthValid} />
+                      </div>
+                      <div>
+                        <label htmlFor="numColorSelect" className="mb-2 block text-xs font-semibold text-gray-700">Thread colours</label>
+                        <div className="relative">
+                          <select id="numColorSelect" value={numColors} onChange={(e) => { setNumColors(Number(e.target.value)); resetFileUpload(); }} className="h-10 w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 pr-9 text-sm text-gray-950 outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/20">
+                            {Array.from({ length: 11 }, (_, i) => i + 2).map((num) => <option key={num} value={num}>{num} colours</option>)}
+                          </select>
+                          <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-3 size-4 text-gray-500" />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="flex items-start gap-2 text-xs leading-5 text-gray-500"><CircleHelp aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /> Height follows your cropped image. We’ll check it fits your hoop.</p>
+                    {!widthValid && <p role="alert" className="text-xs text-red-600">Choose a width between 10 and {HOOP_PRESETS[selectedHoop].maxW} mm.</p>}
+                    <Button size="lg" className="w-full" disabled={!file || !widthValid || isLoading} onClick={handleGenerate}>
+                      {isLoading ? <><span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Generating stitches…</> : <><Sparkles aria-hidden="true" /> Generate stitches <ArrowRight aria-hidden="true" /></>}
+                    </Button>
+                    {!file && <p className="text-center text-xs text-gray-400">Select and confirm your artwork to get started.</p>}
+                    {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_6px_24px_-16px_rgba(15,23,42,0.2)]">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700"><Layers3 aria-hidden="true" className="size-4" /></span>
+                    <div><h3 className="text-sm font-semibold">03 / Stitch preview</h3><p className="text-xs text-gray-500">A look at the actual stitches in your file.</p></div>
+                  </div>
+                  <span className="hidden items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-gray-500 sm:flex"><span className={`size-1.5 rounded-full ${preview ? "bg-sky-500" : "bg-gray-300"}`} />{preview ? "Ready" : "Waiting"}</span>
+                </div>
+                <div className="hatched p-3 sm:p-5">
+                  <div className="preview-grid flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-5 sm:p-8">
+                    {preview && bounds ? <StitchPreview preview={preview} bounds={bounds} /> : (
+                      <div className="flex max-w-xs flex-col items-center text-center">
+                        <div className="mb-5 flex size-20 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm"><Layers3 aria-hidden="true" className="size-8 text-sky-500" strokeWidth={1.5} /></div>
+                        <p className="text-lg font-medium tracking-tight text-gray-950">Your stitches go here</p>
+                        <p className="mt-2 text-sm leading-6 text-gray-500">Upload an image, adjust your settings, and generate a design to see the stitch-by-stitch result.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t border-gray-100 px-5 py-5">
+                  {preview && bounds ? (
+                    <div className="mb-5 flex flex-wrap gap-x-7 gap-y-3 text-sm">
+                      <div><p className="font-mono text-[10px] uppercase tracking-wider text-gray-400">Design size</p><p className="mt-1 font-semibold">{(bounds.widthUnits / 10).toFixed(1)} × {(bounds.heightUnits / 10).toFixed(1)} mm</p></div>
+                      <div><p className="font-mono text-[10px] uppercase tracking-wider text-gray-400">Stitches</p><p className="mt-1 font-semibold">{stitchCount?.toLocaleString()}</p></div>
+                      <div><p className="font-mono text-[10px] uppercase tracking-wider text-gray-400">Colour blocks</p><p className="mt-1 font-semibold">{preview.length}</p></div>
+                    </div>
+                  ) : <p className="mb-4 flex items-center gap-2 text-xs text-gray-500"><Check aria-hidden="true" className="size-4 text-sky-500" /> The preview is drawn from the generated embroidery file.</p>}
+                  <DownloadButton base64Content={base64File ?? ""} disabled={!base64File} />
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 px-5 py-5 text-xs text-gray-500 sm:px-10">
+          <span>Stitchery / Made for the joy of making.</span>
+          <span>Best with clean line art & simple patterns.</span>
+        </div>
+      </main>
+    </div>
   );
 }
 
