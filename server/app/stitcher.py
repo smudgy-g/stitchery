@@ -1,7 +1,10 @@
+import logging
 import subprocess
 import tempfile
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def svg_to_pes(svg_bytes: bytes) -> bytes:
@@ -30,7 +33,7 @@ def svg_to_pes(svg_bytes: bytes) -> bytes:
             timeout=120,
         )
 
-        print(result.stderr.decode("utf-8", errors="replace"))
+        logger.debug(result.stderr.decode("utf-8", errors="replace"))
 
         if not result.stdout:
             std_error = result.stderr.decode("utf-8", errors="replace").strip()

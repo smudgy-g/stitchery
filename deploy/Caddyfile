@@ -1,0 +1,17 @@
+# SITE_ADDRESS is the domain in production (automatic HTTPS) or ":80" for a local test.
+{$SITE_ADDRESS}
+
+encode gzip
+
+handle_path /api/* {
+	request_body {
+		max_size 20MB
+	}
+	reverse_proxy api:8000
+}
+
+handle {
+	root * /srv/client
+	try_files {path} /index.html
+	file_server
+}

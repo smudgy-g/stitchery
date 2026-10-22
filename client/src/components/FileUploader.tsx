@@ -1,15 +1,24 @@
-import { useRef, useState } from "react";
-import { Check, ImagePlus, RotateCcw, Upload } from "lucide-react";
-import ReactCrop, { type Crop, type PixelCrop } from "react-image-crop";
+import { useEffect, useRef, useState } from "react";
+import { Check, ImagePlus, Maximize2, RotateCw, Upload } from "lucide-react";
+import ReactCrop, { centerCrop, convertToPixelCrop, makeAspectCrop, type Crop, type PixelCrop } from "react-image-crop";
 import { Button } from "./ui/button";
 import "react-image-crop/dist/ReactCrop.css";
 
 interface Props {
-  onFileSelect: (file: File | null) => void;
+  /** widthPx is the confirmed image's pixel width, for the resolution check. */
+  onFileSelect: (file: File | null, widthPx?: number) => void;
   confirmed: boolean;
+  /** Hoop width / height. The crop is locked to it, so every confirmed image fits the hoop. */
+  aspect: number;
 }
 
-export default function FileUploader({ onFileSelect, confirmed }: Props) {
+/** Largest centred crop of the hoop's shape. */
+function hoopCrop(image: HTMLImageElement, aspect: number) {
+  const crop = centerCrop(makeAspectCrop({ unit: "%", width: 100 }, aspect, image.width, image.height), image.width, image.height);
+  return { crop, pixelCrop: convertToPixelCrop(crop, image.width, image.height) };
+}
+
+export default function FileUploader({ onFileSelect, confirmed, aspect }: Props) {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [imgSrc, setImgSrc] = useState("");
   const [crop, setCrop] = useState<Crop>();
@@ -19,6 +28,32 @@ export default function FileUploader({ onFileSelect, confirmed }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const readerRef = useRef<FileReader | null>(null);
   const selectionId = useRef(0);
+
+  const resetCrop = () => {
+    if (!imgRef.current) return;
+    const { crop: next, pixelCrop } = hoopCrop(imgRef.current, aspect);
+    setCrop(next);
+    setCompletedCrop(pixelCrop);
+  };
+
+  // Reshape the crop box when the hoop changes (the parent drops the old confirmed image)
+  useEffect(() => {
+    const image = imgRef.current;
+    if (!image?.complete || !image.width) return;
+    selectionId.current++;
+    const { crop: next, pixelCrop } = hoopCrop(image, aspect);
+    setCrop(next);
+    setCompletedCrop(pixelCrop);
+  }, [aspect]);
+
+  const emit = (canvas: HTMLCanvasElement, name: string) => {
+    const id = selectionId.current;
+    canvas.toBlob((blob) => {
+      if (id !== selectionId.current) return;
+      if (blob) onFileSelect(new File([blob], name, { type: "image/png" }), canvas.width);
+      else setCropError("Could not prepare this image. Try another file.");
+    }, "image/png");
+  };
 
   const chooseFile = (nextFile: File) => {
     selectionId.current++;
@@ -35,6 +70,28 @@ export default function FileUploader({ onFileSelect, confirmed }: Props) {
     reader.readAsDataURL(nextFile);
   };
 
+  // Rotate the source 90° clockwise so cropping and "use full image" both see the rotated artwork.
+  const rotate = () => {
+    const image = imgRef.current;
+    if (!image || !sourceFile) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalHeight;
+    canvas.height = image.naturalWidth;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { setCropError("Could not rotate this image. Try another file."); return; }
+    ctx.translate(canvas.width, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(image, 0, 0);
+
+    const id = ++selectionId.current;
+    onFileSelect(null);
+    canvas.toBlob((blob) => {
+      if (id !== selectionId.current) return;
+      if (blob) chooseFile(new File([blob], sourceFile.name, { type: "image/png" }));
+      else setCropError("Could not rotate this image. Try another file.");
+    }, "image/png");
+  };
+
   const applyCrop = () => {
     const image = imgRef.current;
     if (!image || !completedCrop || !completedCrop.width || !completedCrop.height) return;
@@ -43,20 +100,39 @@ export default function FileUploader({ onFileSelect, confirmed }: Props) {
     const scaleX = image.naturalWidth / image.width;
     const scaleY = image.naturalHeight / image.height;
     canvas.width = Math.round(completedCrop.width * scaleX);
-    canvas.height = Math.round(completedCrop.height * scaleY);
+    // Floor, so pixel rounding can never make the design taller than the hoop
+    canvas.height = Math.floor(canvas.width / aspect);
     const ctx = canvas.getContext("2d");
     if (!ctx) { setCropError("Could not crop this image. Try another file."); return; }
 
     ctx.drawImage(image, completedCrop.x * scaleX, completedCrop.y * scaleY,
       completedCrop.width * scaleX, completedCrop.height * scaleY,
       0, 0, canvas.width, canvas.height);
+    emit(canvas, "cropped_design.png");
+  };
 
-    const id = selectionId.current;
-    canvas.toBlob((blob) => {
-      if (id !== selectionId.current) return;
-      if (blob) onFileSelect(new File([blob], "cropped_design.png", { type: "image/png" }));
-      else setCropError("Could not crop this image. Try another file.");
-    }, "image/png");
+  // Pads the whole image out to the hoop's shape instead of cutting anything off.
+  const fitWholeImage = () => {
+    const image = imgRef.current;
+    if (!image) return;
+    selectionId.current++;
+    resetCrop();
+
+    const w = image.naturalWidth, h = image.naturalHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = w / h > aspect ? w : Math.ceil(h * aspect);
+    canvas.height = w / h > aspect ? Math.floor(w / aspect) : h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { setCropError("Could not prepare this image. Try another file."); return; }
+
+    // ponytail: pads with the top-left pixel's colour, so a plain background is stripped with the padding.
+    // A busy or gradient background shows a visible border; crop instead for those.
+    ctx.drawImage(image, 0, 0);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    ctx.fillStyle = a < 128 ? "#ffffff" : `rgb(${r} ${g} ${b})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, Math.floor((canvas.width - w) / 2), Math.floor((canvas.height - h) / 2));
+    emit(canvas, "fitted_design.png");
   };
 
   return (
@@ -100,6 +176,7 @@ export default function FileUploader({ onFileSelect, confirmed }: Props) {
           <div className="preview-grid flex justify-center overflow-hidden rounded-lg border border-gray-100 p-2">
             <ReactCrop
               crop={crop}
+              aspect={aspect}
               onChange={(next) => { selectionId.current++; setCrop(next); if (confirmed) onFileSelect(null); }}
               onComplete={setCompletedCrop}
             >
@@ -107,27 +184,16 @@ export default function FileUploader({ onFileSelect, confirmed }: Props) {
                 ref={imgRef}
                 src={imgSrc}
                 alt="Your artwork. Drag the crop handles to select an area."
-                onLoad={(event) => {
-                  const { width, height } = event.currentTarget;
-                  setCrop({ unit: "%", x: 0, y: 0, width: 100, height: 100 });
-                  setCompletedCrop({ unit: "px", x: 0, y: 0, width, height });
-                }}
+                onLoad={resetCrop}
                 className="max-h-80 max-w-full"
               />
             </ReactCrop>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-gray-500">Drag to crop, or keep the full image.</p>
-            <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => {
-                selectionId.current++;
-                if (imgRef.current) {
-                  const { width, height } = imgRef.current;
-                  setCrop({ unit: "%", x: 0, y: 0, width: 100, height: 100 });
-                  setCompletedCrop({ unit: "px", x: 0, y: 0, width, height });
-                }
-                onFileSelect(sourceFile);
-              }}><RotateCcw aria-hidden="true" /> Use full image</Button>
+            <p className="text-xs text-gray-500">Crop is shaped like your hoop. Drag to choose an area, or fit the whole image.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={rotate} aria-label="Rotate image 90 degrees clockwise"><RotateCw aria-hidden="true" /> Rotate</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={fitWholeImage}><Maximize2 aria-hidden="true" /> Fit whole image</Button>
               <Button type="button" variant="secondary" size="sm" onClick={applyCrop} disabled={!completedCrop?.width || !completedCrop.height}>Confirm crop</Button>
             </div>
           </div>

@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  API_IMAGE: ghcr.io/smudgy-g/stitchery-api
+  WEB_IMAGE: ghcr.io/smudgy-g/stitchery-web
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The server image is ~3.7 GB; the runner's default free disk is tight
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: server
+          load: true
+          tags: ${{ env.API_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Test server image
+        run: docker run --rm "$API_IMAGE:$GITHUB_SHA" python -m unittest discover -s tests
+
+      # Typechecks the client too (pnpm build runs tsc -b)
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          load: true
+          tags: ${{ env.WEB_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Push images
+        run: |
+          for image in "$API_IMAGE" "$WEB_IMAGE"; do
+            docker tag "$image:$GITHUB_SHA" "$image:latest"
+            docker push "$image:$GITHUB_SHA"
+            docker push "$image:latest"
+          done
+
+      - name: Deploy to Droplet
+        env:
+          HOST: ${{ secrets.DROPLET_HOST }}
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          HOST_KEY: ${{ secrets.DROPLET_HOST_KEY }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "$HOST_KEY" > ~/.ssh/known_hosts
+          scp deploy/compose.yml "deploy@$HOST:/srv/stitchery/compose.yml"
+          # The run's token is only valid during this job, so nothing long-lived is stored on the server
+          ssh "deploy@$HOST" "set -e
+            cd /srv/stitchery
+            echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+            export IMAGE_TAG='$GITHUB_SHA'
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker logout ghcr.io
+            docker image prune -af"

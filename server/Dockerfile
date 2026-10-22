@@ -37,6 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /app /app
 
 ENV PATH="/app/.venv/bin:$PATH" \
-    INKSTITCH_BIN=/opt/inkstitch/bin/inkstitch
+    INKSTITCH_BIN=/opt/inkstitch/bin/inkstitch \
+    U2NET_HOME=/opt/u2net
+
+# bake the background-removal model into the image instead of downloading per container
+RUN python -c "from rembg import new_session; new_session('u2net')"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
