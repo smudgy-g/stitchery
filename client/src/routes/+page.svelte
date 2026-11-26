@@ -2,7 +2,7 @@
   import { onMount, untrack } from "svelte";
   import {
     ArrowDown, ArrowUp, ArrowUpRight, Crop, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Image as ImageIcon, ImagePlus,
-    ListOrdered, Maximize, Palette, Pencil, Printer, RefreshCw, RotateCcw, RotateCw, Spool, Undo2, WandSparkles,
+    ListOrdered, Maximize, Palette, Pencil, Printer, RefreshCw, RotateCcw, RotateCw, Spool, Undo2, WandSparkles, ZoomIn, ZoomOut,
   } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { Checkbox } from "$lib/components/ui/checkbox";
@@ -11,6 +11,7 @@
   import * as NativeSelect from "$lib/components/ui/native-select";
   import { Slider } from "$lib/components/ui/slider";
   import * as ToggleGroup from "$lib/components/ui/toggle-group";
+  import HoopFrame from "$lib/HoopFrame.svelte";
   import PictureEditor from "$lib/PictureEditor.svelte";
   import StitchPreview from "$lib/StitchPreview.svelte";
   import ThreadPicker from "$lib/ThreadPicker.svelte";
@@ -54,6 +55,8 @@
   let machineKey = $state("brother_4x4");
   let name = $state("");
   let tab = $state<Tab>("picture");
+  const ZOOMS = [1, 1.5, 2, 3, 4];
+  let zoom = $state(1);
 
   let picture = $state<Picture | null>(null);
   let cropping = $state(false);
@@ -63,7 +66,7 @@
   let smoothing = $state(1);
   let brand = $state("");
   /** The picture in thread colours, made from the settings in `key`. */
-  let colours = $state<{ key: string; base: ImageData; swatches: Swatch[]; widthMm: number } | null>(null);
+  let colours = $state<{ key: string; base: ImageData; swatches: Swatch[]; widthMm: number; x: number; y: number } | null>(null);
   let editing = $state<number | null>(null);
 
   let fabric = $state<Fabric | "custom">("cotton");
@@ -177,7 +180,7 @@
       const made = await makeColours(exported.file, { numColors, smoothing, brand });
       const loaded = await loadColours(made.image, made.colours);
       if (id !== request) return;
-      colours = { key, ...loaded, widthMm: exported.widthMm };
+      colours = { key, ...loaded, widthMm: exported.widthMm, x: exported.x, y: exported.y };
       editing = null;
     } catch (err) {
       if (id === request) error = err instanceof Error ? err.message : String(err);
@@ -300,17 +303,23 @@
     <!-- Canvas -->
     <main class="relative order-1 min-h-0 overflow-hidden rounded-[2rem] bg-card lg:order-none print:rounded-none">
       {#if tab === "picture"}
-        <PictureEditor bind:picture bind:cropping {hoop} onpick={choose} />
+        <PictureEditor bind:picture bind:cropping {hoop} {zoom} onpick={choose} />
       {:else}
-        <div class="flex size-full items-center justify-center p-6 sm:p-10">
-          {#if tab === "colours" && painted}
-            <canvas bind:this={colourCanvas} class="checker max-h-full max-w-full rounded-lg shadow-sm transition-opacity {coloursFresh ? '' : 'opacity-30'}" aria-label="Your picture in thread colours. See-through parts aren’t stitched."></canvas>
-          {:else if (tab === "stitches" || tab === "sew") && result}
-            <div class="size-full transition-opacity {stitchesFresh ? '' : 'opacity-30'}">
-              <StitchPreview preview={result.design.preview} bounds={result.design.bounds} rowSpacingMm={result.rowSpacingMm} />
-            </div>
-          {/if}
-        </div>
+        <HoopFrame {hoop} {zoom}>
+          {#snippet children(k)}
+            {#if colours && painted}
+              <!-- Where the picture sits in the hoop, at the same scale as the Picture tab -->
+              {@const box = `left:${colours.x * k}px;top:${colours.y * k}px;width:${colours.widthMm * k}px;height:${(colours.widthMm * k * painted.height) / painted.width}px`}
+              {#if tab === "colours"}
+                <canvas bind:this={colourCanvas} class="checker absolute shadow-sm transition-opacity {coloursFresh ? '' : 'opacity-30'}" style={box} aria-label="Your picture in thread colours. See-through parts aren’t stitched."></canvas>
+              {:else if result}
+                <div class="absolute flex items-center justify-center transition-opacity {stitchesFresh ? '' : 'opacity-30'}" style={box}>
+                  <StitchPreview preview={result.design.preview} bounds={result.design.bounds} pxPerMm={k} rowSpacingMm={result.rowSpacingMm} />
+                </div>
+              {/if}
+            {/if}
+          {/snippet}
+        </HoopFrame>
         {#if busy || (tab === "stitches" && result && !stitchesFresh)}
           <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center print:hidden">
             {#if busy}
@@ -324,6 +333,13 @@
           </div>
         {/if}
       {/if}
+      <div class="absolute top-3 right-3 flex items-center gap-0.5 rounded-full bg-secondary p-0.5 print:hidden">
+        <Button variant="ghost" size="icon-sm" class="rounded-full" aria-label="Zoom out" disabled={zoom === ZOOMS[0]}
+          onclick={() => (zoom = ZOOMS[ZOOMS.indexOf(zoom) - 1])}><ZoomOut aria-hidden="true" /></Button>
+        <button type="button" class="w-11 text-sm font-medium tabular-nums" title="Fit the hoop" onclick={() => (zoom = 1)}>{zoom * 100}%</button>
+        <Button variant="ghost" size="icon-sm" class="rounded-full" aria-label="Zoom in" disabled={zoom === ZOOMS.at(-1)}
+          onclick={() => (zoom = ZOOMS[ZOOMS.indexOf(zoom) + 1])}><ZoomIn aria-hidden="true" /></Button>
+      </div>
       {#if error || loadError}
         <div role="alert" class="absolute inset-x-4 bottom-4 rounded-2xl bg-ink-950 px-4 py-3 text-white print:hidden">
           {loadError ? "We couldn’t load the machine and thread lists. Please refresh the page." : error}

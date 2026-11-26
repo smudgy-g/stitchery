@@ -1,35 +1,33 @@
 <script lang="ts">
   import { Upload } from "@lucide/svelte";
   import { buttonVariants } from "$lib/components/ui/button";
+  import HoopFrame from "./HoopFrame.svelte";
   import { filterCss, size, type Hoop, type Picture } from "./picture";
 
   interface Props {
     picture: Picture | null;
     hoop: Hoop;
+    zoom: number;
     /** Crop mode: edge handles trim the picture instead of corner/rotate handles. */
     cropping: boolean;
     onpick: (file: File | undefined) => void;
   }
-  let { picture = $bindable(), hoop, cropping = $bindable(), onpick }: Props = $props();
+  let { picture = $bindable(), hoop, zoom, cropping = $bindable(), onpick }: Props = $props();
 
   const MIN_MM = 5;
-  let width = $state(0), height = $state(0);
   let hoopEl = $state<HTMLDivElement>();
   let dragging = $state(false);
-  /** Screen pixels per mm */
-  let k = $derived(Math.max(0.1, Math.min((width - 48) / hoop.w, (height - 48) / hoop.h)));
 
-  let frame = $derived.by(() => {
-    if (!picture) return "";
-    const { w, h } = size(picture);
-    return `left:${picture.cx * k}px;top:${picture.cy * k}px;width:${w * k}px;height:${h * k}px;transform:translate(-50%,-50%) rotate(${picture.rotation}deg)`;
-  });
+  /** `k` is screen pixels per mm */
+  function frameStyle(p: Picture, k: number) {
+    const { w, h } = size(p);
+    return `left:${p.cx * k}px;top:${p.cy * k}px;width:${w * k}px;height:${h * k}px;transform:translate(-50%,-50%) rotate(${p.rotation}deg)`;
+  }
   // The whole image, placed so its crop window lines up with the frame
-  let imageStyle = $derived.by(() => {
-    if (!picture) return "";
-    const m = picture.mmPerPx * k;
-    return `left:${-picture.crop.l * m}px;top:${-picture.crop.t * m}px;width:${picture.image.naturalWidth * m}px;height:${picture.image.naturalHeight * m}px;filter:${filterCss(picture.adjust)}`;
-  });
+  function imageStyle(p: Picture, k: number) {
+    const m = p.mmPerPx * k;
+    return `left:${-p.crop.l * m}px;top:${-p.crop.t * m}px;width:${p.image.naturalWidth * m}px;height:${p.image.naturalHeight * m}px;filter:${filterCss(p.adjust)}`;
+  }
   let flip = $derived(picture ? `transform:scale(${picture.flipX ? -1 : 1},${picture.flipY ? -1 : 1})` : "");
 
   type Kind = "move" | "rotate" | "scale" | "l" | "r" | "t" | "b";
@@ -42,6 +40,7 @@
 
   function toMm(e: PointerEvent) {
     const rect = hoopEl!.getBoundingClientRect();
+    const k = rect.width / hoop.w;
     return { x: (e.clientX - rect.left) / k, y: (e.clientY - rect.top) / k };
   }
 
@@ -121,24 +120,27 @@
   let isDropping = $state(false);
 </script>
 
-<div
-  bind:clientWidth={width}
-  bind:clientHeight={height}
+<HoopFrame
+  {hoop}
+  {zoom}
+  bind:hoopEl
   role="presentation"
-  class="relative size-full overflow-hidden select-none"
+  class="select-none"
   ondragover={(e) => { e.preventDefault(); isDropping = true; }}
   ondragleave={() => (isDropping = false)}
   ondrop={(e) => { e.preventDefault(); isDropping = false; onpick(e.dataTransfer?.files[0]); }}
   onpointerdown={() => (cropping = false)}
 >
-  <div bind:this={hoopEl} class="preview-grid absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[2rem]" style="width:{hoop.w * k}px;height:{hoop.h * k}px">
+  {#snippet children(k)}
+    {@const frame = picture ? frameStyle(picture, k) : ""}
+    {@const image = picture ? imageStyle(picture, k) : ""}
     {#if picture}
       <!-- The picture. In crop mode the trimmed-off parts show faintly around it. -->
       <div class="absolute" style={frame}>
         <div class="absolute inset-0" style={flip}>
-          {#if cropping}<img src={picture.image.src} alt="" class="absolute max-w-none opacity-30" style={imageStyle} draggable="false" />{/if}
+          {#if cropping}<img src={picture.image.src} alt="" class="absolute max-w-none opacity-30" style={image} draggable="false" />{/if}
           <div class="absolute inset-0 overflow-hidden">
-            <img src={picture.image.src} alt="What will be stitched" class="absolute max-w-none" style={imageStyle} draggable="false" />
+            <img src={picture.image.src} alt="What will be stitched" class="absolute max-w-none" style={image} draggable="false" />
           </div>
         </div>
       </div>
@@ -182,5 +184,5 @@
         <span class="max-w-64 text-muted-foreground">or drag one here. Simple drawings and logos work best.</span>
       </label>
     {/if}
-  </div>
-</div>
+  {/snippet}
+</HoopFrame>

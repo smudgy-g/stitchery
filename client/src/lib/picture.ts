@@ -73,9 +73,9 @@ export const pxPerMm = (p: Picture) => 1 / p.mmPerPx;
 
 /**
  * The part of the hoop the picture covers, as a PNG with everything else transparent,
- * and its width in mm. Null when the picture is outside the hoop.
+ * its width in mm and its top-left corner in the hoop (mm). Null when the picture is outside the hoop.
  */
-export async function exportPicture(p: Picture, hoop: Hoop): Promise<{ file: File; widthMm: number } | null> {
+export async function exportPicture(p: Picture, hoop: Hoop): Promise<{ file: File; widthMm: number; x: number; y: number } | null> {
   const b = bounds(p);
   const m = HOOP_MARGIN_MM;
   const x = Math.max(m, b.x), y = Math.max(m, b.y);
@@ -97,7 +97,7 @@ export async function exportPicture(p: Picture, hoop: Hoop): Promise<{ file: Fil
   const { l, t, r, b: bottom } = p.crop;
   ctx.drawImage(p.image, l, t, r - l, bottom - t, -vw / 2, -vh / 2, vw, vh);
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  return blob && { file: new File([blob], "picture.png", { type: "image/png" }), widthMm: Math.min(canvas.width / s, hoop.w - 2 * m) };
+  return blob && { file: new File([blob], "picture.png", { type: "image/png" }), widthMm: Math.min(canvas.width / s, hoop.w - 2 * m), x, y };
 }
 
 export async function decode(blob: Blob): Promise<HTMLImageElement> {
