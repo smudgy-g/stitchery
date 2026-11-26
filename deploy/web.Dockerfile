@@ -12,4 +12,4 @@ RUN VITE_API_URL=/api pnpm build
 
 FROM caddy:2-alpine
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
-COPY --from=build /client/dist /srv/client
+COPY --from=build /client/build /srv/client

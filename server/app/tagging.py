@@ -7,6 +7,9 @@ from lxml import etree
 SVG_NS = "http://www.w3.org/2000/svg"
 INKSTITCH_NS = "http://inkstitch.org/namespace"
 logger = logging.getLogger(__name__)
+# Fill rows across thin traced bands (outlines, shading edges) otherwise sew as hundreds of
+# sub-millimetre stitches. Measured on the wombat sample: 15.6k -> 9.8k stitches, same look.
+MIN_FILL_STITCH_MM = 0.8
 
 
 def spans_canvas(
@@ -95,13 +98,19 @@ def tag_svg(
     target_height_mm: float = 80.0,
     palette: list[str] | None = None,
     non_overlapping: bool = False,
+    order: list[str] | None = None,
+    fill_params: dict[str, str] | None = None,
+    outline: dict[str, str] | None = None,
 ) -> bytes:
     """Prepares VTracer SVG for stitch generation:
     1. Rescales dimensions from px to physical mm units.
     2. Snaps fills back to the thread palette (VTracer averages merged regions).
     3. Strips background canvas path if detected.
     4. Keeps the trace's paint order so overlapping colours stay visible, unless the
-       paths don't overlap: then same-colour paths are grouped, one thread change per colour.
+       paths don't overlap: then same-colour paths are grouped, one thread change per colour,
+       in `order` (fill colours) when given.
+    5. Applies `fill_params` (Ink/Stitch fill attributes) to every fill, and with `outline`
+       ({"hex", "style": running|bean}) sews a running stitch around every fill, last.
     """
     root = etree.fromstring(svg_str.encode())
 
@@ -111,6 +120,12 @@ def tag_svg(
 
     w_mm = target_width_mm
     h_mm = target_height_mm
+
+    # Without a version, Ink/Stitch treats any inkstitch:* attribute as an old document and
+    # opens an "update?" dialog, which on a server never returns.
+    metadata = etree.Element(f"{{{SVG_NS}}}metadata")
+    etree.SubElement(metadata, f"{{{INKSTITCH_NS}}}inkstitch_svg_version").text = "3"
+    root.insert(0, metadata)
 
     root.set("viewBox", f"0 0 {w_px} {h_px}")
     root.set("width", f"{w_mm}mm")
@@ -153,11 +168,25 @@ def tag_svg(
             p.set(f"{{{INKSTITCH_NS}}}stroke_method", "running_stitch")
         else:
             p.set("stroke", "none")
+            p.set(f"{{{INKSTITCH_NS}}}min_stitch_length_mm", str(MIN_FILL_STITCH_MM))
+            for name, value in (fill_params or {}).items():
+                p.set(f"{{{INKSTITCH_NS}}}{name}", value)
 
     if non_overlapping:
         colour = lambda p: p.get("stroke") if p.get("fill") == "none" else p.get("fill")
-        order = {c: i for i, c in reversed(list(enumerate(map(colour, paths))))}
-        for p in sorted(paths, key=lambda p: order[colour(p)]):
+        rank = ({c: i for i, c in enumerate(order)} if order
+                else {c: i for i, c in reversed(list(enumerate(map(colour, paths))))})
+        for p in sorted(paths, key=lambda p: rank.get(colour(p), len(rank))):
             root.append(p)  # append moves the element, so this reorders in place
+
+    if outline:
+        # ponytail: a border shared by two colours is outlined once from each side; dedupe edges if that shows
+        for p in [p for p in paths if p.get("fill") != "none"]:
+            line = etree.SubElement(root, f"{{{SVG_NS}}}path", d=p.get("d"), fill="none", stroke=outline["hex"])
+            if p.get("transform"):
+                line.set("transform", p.get("transform"))
+            line.set(f"{{{INKSTITCH_NS}}}stroke_method", "running_stitch")
+            if outline["style"] == "bean":
+                line.set(f"{{{INKSTITCH_NS}}}bean_stitch_repeats", "1")
 
     return etree.tostring(root)

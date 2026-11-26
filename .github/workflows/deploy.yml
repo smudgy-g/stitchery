@@ -47,7 +47,7 @@ jobs:
       - name: Test server image
         run: docker run --rm "$API_IMAGE:$GITHUB_SHA" python -m unittest discover -s tests
 
-      # Typechecks the client too (pnpm build runs tsc -b)
+      # Typechecks the client too (pnpm build runs svelte-check)
       - name: Build web image
         uses: docker/build-push-action@v6
         with:

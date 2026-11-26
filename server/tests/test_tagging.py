@@ -38,6 +38,10 @@ class TaggingTests(unittest.TestCase):
         self.assertEqual(line.get(f"{{{INKSTITCH_NS}}}stroke_method"), "running_stitch")
         self.assertEqual(square.get("fill"), "#ff0000")
         self.assertEqual(square.get("stroke"), "none")
+        self.assertEqual(square.get(f"{{{INKSTITCH_NS}}}min_stitch_length_mm"), "0.8")
+        self.assertIsNone(line.get(f"{{{INKSTITCH_NS}}}min_stitch_length_mm"))
+        # Ink/Stitch blocks on an "update document?" dialog for inkstitch:* attributes without this
+        self.assertEqual(root.find(f"{{{SVG_NS}}}metadata/{{{INKSTITCH_NS}}}inkstitch_svg_version").text, "3")
 
     def test_vtracer_curved_and_wide_shapes_stay_fills(self):
         svg = f'''<svg xmlns="{SVG_NS}" width="100" height="100">

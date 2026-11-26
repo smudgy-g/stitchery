@@ -11,7 +11,7 @@ from lxml import etree
 from PIL import Image, ImageDraw
 
 from app.main import MACHINES, app
-from app.tagging import SVG_NS
+from app.tagging import INKSTITCH_NS, SVG_NS
 
 RECT_PES = (Path(__file__).parent / "fixtures" / "rect40.pes").read_bytes()
 
@@ -20,16 +20,30 @@ class UploadTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
 
-    def upload(self, size, width_mm, machine_key="brother_4x4", background="white"):
+    def make(self, image, width_mm, machine_key="brother_4x4", num_colors=2, extra=""):
+        """Runs the client's two steps: /colours, then /stitch with the stitched colours in order."""
+        data = io.BytesIO()
+        image.save(data, "PNG")
+        colours = self.client.post(f"/colours?num_colors={num_colors}", files={"file": ("design.png", data.getvalue(), "image/png")})
+        self.assertEqual(colours.status_code, 200, colours.text)
+        body = colours.json()
+        # The client paints colours it won't stitch transparent
+        flat = Image.open(io.BytesIO(base64.b64decode(body["image"]))).convert("RGBA")
+        skip = {tuple(c["thread"]["rgb"]) for c in body["colours"] if not c["stitched"]}
+        flat.putdata([(0, 0, 0, 0) if p[:3] in skip else p for p in flat.getdata()])
+        data = io.BytesIO()
+        flat.save(data, "PNG")
+        ids = "".join(f"&thread={c['thread']['id']}" for c in body["colours"] if c["stitched"])
+        return self.client.post(
+            f"/stitch?target_width_mm={width_mm}&machine_key={machine_key}{ids}{extra}",
+            files={"file": ("design.png", data.getvalue(), "image/png")},
+        )
+
+    def upload(self, size, width_mm, machine_key="brother_4x4", background="white", extra=""):
         image = Image.new("RGB", size, background)
         w, h = size
         ImageDraw.Draw(image).rectangle((w // 4, h // 4, w * 3 // 4, h * 3 // 4), fill="red")
-        data = io.BytesIO()
-        image.save(data, "PNG")
-        return self.client.post(
-            f"/upload?num_colors=2&target_width_mm={width_mm}&machine_key={machine_key}",
-            files={"file": ("design.png", data.getvalue(), "image/png")},
-        )
+        return self.make(image, width_mm, machine_key, extra=extra)
 
     def test_landscape_and_portrait_sizes_and_hoop_limit(self):
         for size, width_mm, expected in [
@@ -58,13 +72,8 @@ class UploadTests(unittest.TestCase):
         image = Image.new("RGB", (60, 60), "white")
         ImageDraw.Draw(image).rectangle((10, 10, 50, 50), fill="blue")
         ImageDraw.Draw(image).rectangle((25, 25, 35, 35), fill="red")
-        data = io.BytesIO()
-        image.save(data, "PNG")
         with patch("app.main.svg_to_pes", return_value=RECT_PES) as svg_to_pes:
-            response = self.client.post(
-                "/upload?num_colors=3&target_width_mm=60",
-                files={"file": ("design.png", data.getvalue(), "image/png")},
-            )
+            response = self.make(image, 60, num_colors=3)
         self.assertEqual(response.status_code, 200, response.text)
         root = etree.fromstring(svg_to_pes.call_args.args[0])
         # Pure blue snaps to a purple thread, so pick the outer square as "not the red one".
@@ -74,7 +83,7 @@ class UploadTests(unittest.TestCase):
 
     def test_dev_cors_allows_vite_port_change(self):
         response = self.client.options(
-            "/upload",
+            "/stitch",
             headers={
                 "Origin": "http://localhost:5175",
                 "Access-Control-Request-Method": "POST",
@@ -84,7 +93,7 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5175")
 
         response = self.client.options(
-            "/upload",
+            "/stitch",
             headers={
                 "Origin": "https://untrusted.example",
                 "Access-Control-Request-Method": "POST",
@@ -108,6 +117,45 @@ class UploadTests(unittest.TestCase):
             with self.subTest(status=status), patch("app.main.svg_to_pes", side_effect=error):
                 self.assertEqual(self.upload((40, 40), 40).status_code, status)
 
+    def test_sewing_order_and_outline_follow_the_request(self):
+        image = Image.new("RGB", (60, 60), "white")
+        ImageDraw.Draw(image).rectangle((10, 10, 50, 50), fill="blue")
+        ImageDraw.Draw(image).rectangle((25, 25, 35, 35), fill="red")
+        with patch("app.main.svg_to_pes", return_value=RECT_PES) as svg_to_pes:
+            response = self.make(image, 60, num_colors=3, extra="&outline_thread=Brother:1&outline_style=bean&fill_method=contour_fill&row_spacing_mm=0.4")
+        self.assertEqual(response.status_code, 200, response.text)
+        paths = etree.fromstring(svg_to_pes.call_args.args[0]).findall(f"{{{SVG_NS}}}path")
+        fills = [p for p in paths if p.get("fill") != "none"]
+        outlines = [p for p in paths if p.get("fill") == "none"]
+        self.assertEqual(len(outlines), len(fills))
+        self.assertTrue(all(p.get(f"{{{INKSTITCH_NS}}}bean_stitch_repeats") == "1" for p in outlines))
+        self.assertTrue(all(p.get(f"{{{INKSTITCH_NS}}}fill_method") == "contour_fill" for p in fills))
+        self.assertTrue(all(p.get(f"{{{INKSTITCH_NS}}}row_spacing_mm") == "0.4" for p in fills))
+        self.assertGreater(paths.index(outlines[0]), paths.index(fills[-1]), "outline is sewn last")
+
+    def test_rejects_unknown_threads(self):
+        data = io.BytesIO()
+        Image.new("RGBA", (40, 40), "red").save(data, "PNG")
+        for query in ["thread=Nope:1", "thread=Brother:1&outline_thread=Nope:1"]:
+            with self.subTest(query=query):
+                response = self.client.post(f"/stitch?{query}", files={"file": ("d.png", data.getvalue(), "image/png")})
+                self.assertEqual(response.status_code, 400, response.text)
+
+    def test_transparent_picture_has_nothing_to_stitch(self):
+        data = io.BytesIO()
+        Image.new("RGBA", (40, 40)).save(data, "PNG")
+        response = self.client.post("/colours", files={"file": ("d.png", data.getvalue(), "image/png")})
+        self.assertEqual(response.status_code, 400)
+
+    def test_remove_background_returns_png(self):
+        data = io.BytesIO()
+        Image.new("RGB", (40, 40), "red").save(data, "PNG")
+        cutout = Image.new("RGBA", (40, 40))
+        with patch("app.main.remove_background", return_value=cutout):
+            response = self.client.post("/remove-background", files={"file": ("d.png", data.getvalue(), "image/png")})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Image.open(io.BytesIO(response.content)).mode, "RGBA")
+
     def test_machines_lists_presets(self):
         response = self.client.get("/machines")
         self.assertEqual(response.status_code, 200)
@@ -120,7 +168,8 @@ class UploadTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 body = response.json()
                 self.assertEqual(body["format"], machine["format"])
-                self.assertTrue(all(t["brand"].lower() in (machine["threads"], "brother") for t in body["threads"]))
+                self.assertTrue(all(t["brand"] in ("Brother", "Janome", "Husqvarna") for t in body["threads"]))
+                self.assertTrue(all(block["thread"] in body["threads"] for block in body["preview"]))
                 pattern = getattr(pystitch, f"read_{machine['format']}")(io.BytesIO(base64.b64decode(body["file_base64"])))
                 self.assertGreater(pattern.count_stitch_commands(pystitch.STITCH), 0)
 

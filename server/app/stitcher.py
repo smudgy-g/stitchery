@@ -30,7 +30,9 @@ def svg_to_pes(svg_bytes: bytes) -> bytes:
                 svg_path,
             ],
             capture_output=True,
-            timeout=120,
+            # Pull compensation on detailed pictures takes minutes (koala: ~140s). Kept under Firefox's
+            # 300s response timeout so the person gets our message, not a dropped connection.
+            timeout=240,
         )
 
         logger.debug(result.stderr.decode("utf-8", errors="replace"))
