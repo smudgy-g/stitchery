@@ -1,39 +1,51 @@
 {
   "base": "main",
+  "tracker": {
+    "command": ["github"]
+  },
   "paths": {
-    "tests": [
-      "test/**",
-      "tests/**",
-      "**/*.test.*",
-      "**/*.spec.*"
-    ],
-    "protected": [
-      ".factory/**"
-    ],
+    "tests": ["test/**", "tests/**", "**/*.test.*", "**/*.spec.*"],
+    "protected": [".factory/**"],
     "sensitive": []
   },
   "sandbox": {
     "kit": "shell",
     "cpus": 2,
     "memory": "2g",
-    "allowlist": [],
+    "allowlist": [
+      "nodejs.org",
+      "registry.npmjs.org",
+      "astral.sh",
+      "github.com",
+      "release-assets.githubusercontent.com",
+      "pypi.org",
+      "files.pythonhosted.org"
+    ],
     "maxConcurrent": 1
   },
   "commands": {
-    "changedCode": [
-      "**/*"
-    ],
-    "setup": [],
+    "changedCode": ["**/*"],
+    "setup": [["bash", ".factory/sandbox-setup.sh"]],
     "autofix": [],
     "check": [],
     "gates": [
+      ["pnpm", "--dir", "client", "build"],
       [
-        "echo",
-        "set commands.gates in .factory/config.json"
+        "uv",
+        "--directory",
+        "server",
+        "run",
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests"
       ]
     ],
     "env": {
-      "CI": "true"
+      "CI": "true",
+      "PATH": "/home/agent/node/bin:/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"
     }
   }
 }
