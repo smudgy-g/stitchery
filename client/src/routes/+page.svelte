@@ -341,7 +341,7 @@
       {#each TABS as t, i (t.key)}
         <button type="button" aria-current={tab === t.key ? "step" : undefined} onclick={() => { tab = t.key; cropping = false; }}
           disabled={i > 0 && !picture}
-          class="flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-2 font-medium transition-colors hover:bg-muted disabled:opacity-40 aria-[current]:bg-ink-950 aria-[current]:text-white text-sm sm:text-base lg:flex-none lg:flex-col lg:gap-1 lg:rounded-3xl lg:py-3 lg:text-sm">
+          class="flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-2 font-medium transition-colors hover:bg-muted disabled:opacity-40 aria-[current]:bg-primary aria-[current]:text-primary-foreground text-sm sm:text-base lg:flex-none lg:flex-col lg:gap-1 lg:rounded-3xl lg:py-3 lg:text-sm">
           <t.icon aria-hidden="true" class="size-5" />{t.label}
         </button>
       {/each}
@@ -368,15 +368,17 @@
           {/snippet}
         </HoopFrame>
         {#if busy || (tab === "stitches" && result && !stitchesFresh)}
-          <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center print:hidden">
-            {#if busy}
-              <span aria-hidden="true" class="size-10 animate-spin rounded-full border-4 border-vermilion-100 border-t-vermilion-500"></span>
-              <p class="display text-3xl">{busy === "colours" ? "Matching threads…" : "Stitching…"}</p>
-              {#if busy === "stitches"}<p class="text-muted-foreground">{settings.pull_compensation_mm > 0 ? "Closing gaps between colours can take a few minutes." : "This usually takes 5 to 30 seconds."}</p>{/if}
-            {:else}
-              <p class="display text-3xl">Settings changed</p>
-              <Button onclick={makeStitchesNow}><RefreshCw aria-hidden="true" /> Update stitches</Button>
-            {/if}
+          <div class="hoop-light absolute inset-0 flex items-center justify-center p-6 text-center print:hidden">
+            <div class="flex flex-col items-center gap-4 rounded-2xl p-4 dark:bg-background">
+              {#if busy}
+                <span aria-hidden="true" class="size-10 animate-spin rounded-full border-4 border-vermilion-100 border-t-vermilion-500"></span>
+                <p class="display text-3xl">{busy === "colours" ? "Matching threads…" : "Stitching…"}</p>
+                {#if busy === "stitches"}<p class="text-muted-foreground">{settings.pull_compensation_mm > 0 ? "Closing gaps between colours can take a few minutes." : "This usually takes 5 to 30 seconds."}</p>{/if}
+              {:else}
+                <p class="display text-3xl">Settings changed</p>
+                <Button onclick={makeStitchesNow}><RefreshCw aria-hidden="true" /> Update stitches</Button>
+              {/if}
+            </div>
           </div>
         {/if}
       {/if}
@@ -566,7 +568,7 @@
             {/if}
           </section>
 
-          <details class="group rounded-2xl bg-paper-100 p-4 [&[open]>summary]:mb-4">
+          <details class="group rounded-2xl bg-background p-4 [&[open]>summary]:mb-4">
             <summary class="cursor-pointer font-semibold">More settings</summary>
             <div class="space-y-5">
               {@render slider("spacing", "Gap between rows", settings.row_spacing_mm, 0.15, 0.8, 0.01, " mm", (v) => { settings.row_spacing_mm = v; fabric = "custom"; })}
@@ -619,7 +621,7 @@
   </div>
 
   <!-- Status bar -->
-  <footer class="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-paper-200 px-5 py-2 text-sm print:border-0">
+  <footer class="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-paper-200 dark:border-border px-5 py-2 text-sm print:border-0">
     {#if design && stitchesFresh}
       {@const w = design.bounds.widthUnits / 10}
       {@const h = design.bounds.heightUnits / 10}
@@ -629,7 +631,7 @@
         {@render stat("Colours", String(design.preview.length))}
         {@render stat("Sewing time", `about ${Math.max(1, Math.round(stitchCount / STITCHES_PER_MINUTE))} min`)}
       </dl>
-      {#if stitchCount > MANY_STITCHES}<span class="font-medium text-vermilion-700">That’s a lot of stitches: it may come out stiff. Try fewer colours, a smaller size or a wider row gap.</span>{/if}
+      {#if stitchCount > MANY_STITCHES}<span class="font-medium text-vermilion-700 dark:text-vermilion-400">That’s a lot of stitches: it may come out stiff. Try fewer colours, a smaller size or a wider row gap.</span>{/if}
     {:else if picture && pictureSize}
       <dl class="contents">{@render stat("Picture", `${Math.round(pictureSize.w)} × ${Math.round(pictureSize.h)} mm`)}{@render stat("Angle", `${picture.rotation}°`)}</dl>
     {:else}

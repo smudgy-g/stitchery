@@ -11,7 +11,7 @@
   let shown = $derived(sorted.filter((t) => (!brand || t.brand === brand) && `${t.name} ${t.code}`.toLowerCase().includes(query.trim().toLowerCase())));
 </script>
 
-<div class="space-y-3 rounded-2xl bg-paper-100 p-3">
+<div class="space-y-3 rounded-2xl bg-background p-3">
   <div class="flex gap-2">
     <Input bind:value={query} placeholder="Search threads" aria-label="Search threads by name or number" class="h-10" />
     <select bind:value={brand} aria-label="Thread brand" class="h-10 rounded-full border border-input bg-card px-3">
