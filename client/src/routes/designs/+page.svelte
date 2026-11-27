@@ -69,7 +69,7 @@
       {#if designs?.length}
         <ul class="mt-6 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4">
           {#each designs as d (d.id)}
-            <li class="flex flex-col rounded-3xl border bg-paper-50 p-3 transition-opacity {pending === `${d.id}:delete` ? 'opacity-50' : ''}" aria-busy={pending.startsWith(d.id)}>
+            <li class="flex flex-col rounded-3xl border bg-card p-3 transition-opacity {pending === `${d.id}:delete` ? 'opacity-50' : ''}" aria-busy={pending.startsWith(d.id)}>
               <img src={d.thumbnail} alt="" class="aspect-square w-full rounded-2xl bg-white object-contain p-4" />
               <div class="mt-3 flex items-start gap-1 px-1">
                 <div class="min-w-0 flex-1">
@@ -88,7 +88,7 @@
           {/each}
         </ul>
       {:else if designs}
-        <p class="mt-6 rounded-2xl bg-paper-100 p-4">Nothing saved yet. Make a design, then choose <strong>Save to my designs</strong> on the Sew tab.</p>
+        <p class="mt-6 rounded-2xl bg-background p-4">Nothing saved yet. Make a design, then choose <strong>Save to my designs</strong> on the Sew tab.</p>
       {:else if busy}
         <p class="mt-6 flex items-center gap-2 text-muted-foreground"><LoaderCircle aria-hidden="true" class="size-5 animate-spin" /> Loading your designs…</p>
       {/if}

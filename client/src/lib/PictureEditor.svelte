@@ -147,7 +147,7 @@
     {/if}
 
     <!-- Hoop edge: outside it nothing is stitched, so it is faded out -->
-    <div class="pointer-events-none absolute inset-0 rounded-[2rem] border-[3px] border-dashed border-vermilion-500 shadow-[0_0_0_100vmax_rgb(245_238_232/0.8)]"></div>
+    <div class="pointer-events-none absolute inset-0 rounded-[2rem] border-[3px] border-dashed border-vermilion-500 shadow-[0_0_0_100vmax_color-mix(in_srgb,var(--background)_80%,transparent)]"></div>
     <span class="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 text-sm font-medium whitespace-nowrap text-muted-foreground">Hoop · {hoop.w} × {hoop.h} mm</span>
 
     {#if picture}
@@ -178,10 +178,10 @@
     {:else}
       <label
         for="picture-input"
-        class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-4 rounded-[2rem] p-6 text-center transition-colors {isDropping ? 'bg-vermilion-100/70' : 'hover:bg-vermilion-50/60'}"
+        class="hoop-light absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-4 rounded-[2rem] p-6 text-center transition-colors {isDropping ? 'bg-vermilion-100/70' : 'hover:bg-vermilion-50/60'}"
       >
         <span class={buttonVariants({ size: "lg" })}><Upload aria-hidden="true" /> Choose a picture</span>
-        <span class="max-w-64 text-muted-foreground">or drag one here. Simple drawings and logos work best.</span>
+        <span class="max-w-64 text-muted-foreground dark:rounded-xl dark:bg-paper-100 dark:px-2 dark:py-1">or drag one here. Simple drawings and logos work best.</span>
       </label>
     {/if}
   {/snippet}

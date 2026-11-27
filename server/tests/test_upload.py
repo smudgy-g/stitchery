@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.main import MACHINES, app
 from app.tagging import INKSTITCH_NS, SVG_NS
 
 RECT_PES = (Path(__file__).parent / "fixtures" / "rect40.pes").read_bytes()
+INKSTITCH_AVAILABLE = Path(os.environ.get("INKSTITCH_BIN", "/usr/share/inkscape/extensions/inkstitch/bin/inkstitch")).is_file()
 
 
 class UploadTests(unittest.TestCase):
@@ -51,6 +53,8 @@ class UploadTests(unittest.TestCase):
             ((40, 80), 40, (20, 40)),
         ]:
             with self.subTest(size=size):
+                if not INKSTITCH_AVAILABLE:
+                    self.skipTest("Ink/Stitch executable not installed")
                 response = self.upload(size, width_mm)
                 self.assertEqual(response.status_code, 200, response.text)
                 bounds = response.json()["bounds"]
@@ -61,6 +65,7 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("exceeds", response.json()["detail"])
 
+    @unittest.skipUnless(INKSTITCH_AVAILABLE, "Ink/Stitch executable not installed")
     def test_off_white_background_is_not_stitched(self):
         # vtracer's default colour precision rounds #f0f0f0 to #efefef, defeating background removal.
         response = self.upload((80, 40), 80, background="#f0f0f0")
