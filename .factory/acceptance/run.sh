@@ -14,6 +14,7 @@ printf '#!/bin/sh\nexec node %s/package/bin/pnpm.cjs "$@"\n' "$work" > "$work/bi
 chmod +x "$work/bin/pnpm"
 export PATH="$work/bin:$work/node/bin:$PATH" CI=true
 cp -r "$ASSETS/pnpm-store" "$work/store"
+cp -r "$ASSETS/pnpm-cache" "$work/cache"
 
 verdict() {
   node -e 'process.stdout.write(JSON.stringify({commit: process.env.COMMIT, pass: process.argv[1] === "true", detail: process.argv[2].slice(-1500) || "no detail"}) + "\n")' "$1" "$2"
@@ -22,7 +23,7 @@ verdict() {
 
 cd "$work/project/client"
 # Install failure means the staged packages no longer match the lockfile: a setup problem, not a verdict.
-pnpm install --offline --frozen-lockfile --store-dir "$work/store" >&2 ||
+pnpm install --offline --frozen-lockfile --store-dir "$work/store" --cache-dir "$work/cache" >&2 ||
   { echo "Offline install failed: restage .factory/assets/pnpm-store for the new lockfile" >&2; exit 2; }
 if ! out=$(pnpm build 2>&1); then echo "$out" >&2; verdict false "Client build failed: ${out: -1000}"; fi
 

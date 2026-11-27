@@ -16,6 +16,7 @@
       "nodejs.org",
       "registry.npmjs.org",
       "astral.sh",
+      "releases.astral.sh",
       "github.com",
       "release-assets.githubusercontent.com",
       "pypi.org",
@@ -43,6 +44,17 @@
         "-s",
         "tests"
       ]
+    ],
+    "preview": [
+      "pnpm",
+      "--dir",
+      "client",
+      "dev",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "5173",
+      "--strictPort"
     ],
     "env": {
       "CI": "true",
