@@ -1,0 +1,4 @@
+# Downloaded acceptance toolchains and caches (rebuild locally).
+assets/
+# Local work-item locks (never share across clones).
+claims/

@@ -1,0 +1,39 @@
+{
+  "base": "main",
+  "paths": {
+    "tests": [
+      "test/**",
+      "tests/**",
+      "**/*.test.*",
+      "**/*.spec.*"
+    ],
+    "protected": [
+      ".factory/**"
+    ],
+    "sensitive": []
+  },
+  "sandbox": {
+    "kit": "shell",
+    "cpus": 2,
+    "memory": "2g",
+    "allowlist": [],
+    "maxConcurrent": 1
+  },
+  "commands": {
+    "changedCode": [
+      "**/*"
+    ],
+    "setup": [],
+    "autofix": [],
+    "check": [],
+    "gates": [
+      [
+        "echo",
+        "set commands.gates in .factory/config.json"
+      ]
+    ],
+    "env": {
+      "CI": "true"
+    }
+  }
+}
