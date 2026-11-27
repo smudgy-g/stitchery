@@ -2,7 +2,7 @@ import unittest
 
 from lxml import etree
 
-from app.tagging import SVG_NS, tag_svg
+from app.tagging import SVG_NS, tag_svg, widest_circle_mm
 
 INKSTITCH_NS = "http://inkstitch.org/namespace"
 
@@ -89,6 +89,21 @@ class TaggingTests(unittest.TestCase):
 
         root = etree.fromstring(tag_svg(svg, non_overlapping=True))
         self.assertEqual([p.get("id") for p in root.findall(f"{{{SVG_NS}}}path")], ["red1", "red2", "blue", "green"])
+
+    def test_widest_circle_counts_holes(self):
+        square = "M0 0 L40 0 L40 40 L0 40 Z"
+        self.assertAlmostEqual(widest_circle_mm(square, 0.5), 20, delta=0.6)
+        # A 30-wide hole leaves a 5-wide frame
+        self.assertAlmostEqual(widest_circle_mm(square + " M5 5 L35 5 L35 35 L5 35 Z", 0.5), 2.5, delta=0.6)
+
+    def test_small_shapes_fall_back_from_meander(self):
+        svg = f'''<svg xmlns="{SVG_NS}" width="100" height="100">
+            <path id="big" d="M10 10 L60 10 L60 60 L10 60 Z" fill="#ff0000"/>
+            <path id="speck" d="M80 80 L86 80 L86 86 L80 86 Z" fill="#ff0000"/>
+        </svg>'''
+        root = etree.fromstring(tag_svg(svg, target_width_mm=100, target_height_mm=100, fill_params={"fill_method": "meander_fill"}))
+        method = {p.get("id"): p.get(f"{{{INKSTITCH_NS}}}fill_method") for p in root.findall(f"{{{SVG_NS}}}path")}
+        self.assertEqual(method, {"big": "meander_fill", "speck": "auto_fill"})
 
 
 if __name__ == "__main__":

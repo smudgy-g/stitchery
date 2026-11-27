@@ -15,8 +15,8 @@
 
   let width = $state(0), height = $state(0);
   let scroller: HTMLDivElement;
-  // Every tab uses this one scale, so the design stays the same size between tabs
-  let k = $derived(zoom * Math.max(0.1, Math.min((width - 48) / hoop.w, (height - 48) / hoop.h)));
+  // Every tab uses this one scale (more room on top for the hoop label), so the design stays the same size between tabs
+  let k = $derived(zoom * Math.max(0.1, Math.min((width - 48) / hoop.w, (height - 60) / hoop.h)));
 
   // Zooming keeps the middle of the view in the middle
   $effect(() => {
@@ -27,7 +27,7 @@
 </script>
 
 <div bind:clientWidth={width} bind:clientHeight={height} class="relative size-full {cls}" {...rest}>
-  <div bind:this={scroller} class="absolute inset-0 flex p-6 {zoom > 1 ? 'overflow-auto' : 'overflow-hidden'}">
+  <div bind:this={scroller} class="absolute inset-0 flex p-6 pt-9 {zoom > 1 ? 'overflow-auto' : 'overflow-hidden'}">
     <div bind:this={hoopEl} class="preview-grid relative m-auto shrink-0 rounded-[2rem]" style="width:{hoop.w * k}px;height:{hoop.h * k}px">
       {@render children(k)}
     </div>

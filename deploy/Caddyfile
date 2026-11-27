@@ -3,15 +3,7 @@
 
 encode gzip
 
-handle_path /api/* {
-	request_body {
-		max_size 20MB
-	}
-	reverse_proxy api:8000
+request_body {
+	max_size 20MB
 }
-
-handle {
-	root * /srv/client
-	try_files {path} /index.html
-	file_server
-}
+reverse_proxy app:8000

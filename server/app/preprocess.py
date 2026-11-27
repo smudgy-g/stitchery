@@ -45,6 +45,11 @@ def get_thread_catalog() -> tuple[list[dict], np.ndarray]:
     return catalog, catalog_lab
 
 
+def nearest_thread(rgb, threads: list[dict]) -> dict:
+    """The thread closest to rgb: PES v1 stores Brother palette colours, so this recovers which thread was meant."""
+    return min(threads, key=lambda t: sum((a - b) ** 2 for a, b in zip(t["rgb"], rgb)))
+
+
 @cache
 def background_remover():
     # Heavy (onnxruntime + ~170MB model), so only loaded when a request asks for it.
@@ -143,7 +148,9 @@ def quantize_for_embroidery(
     edge = content.astype(bool) & ~cv2.erode(content, np.ones((3, 3), np.uint8), borderType=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)
     edge_threads = best[labels[edge]]
     background = np.bincount(edge_threads).argmax()
-    if (edge_threads == background).mean() < 0.5 or len(area) == 1:
+    # A cut-out subject (background already removed) isn't convex; its outer edge is the outline, not a background
+    cut_out = content.sum() < 0.95 * cv2.contourArea(cv2.convexHull(cv2.findNonZero(content)))
+    if cut_out or (edge_threads == background).mean() < 0.5 or len(area) == 1:
         background = None  # no clear plain background, or it is the only colour
     colours = [
         {"thread": catalog[i], "stitched": bool(i != background)}

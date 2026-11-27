@@ -2,6 +2,8 @@ import logging
 import math
 import re
 
+import cv2
+import numpy as np
 from lxml import etree
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -10,6 +12,38 @@ logger = logging.getLogger(__name__)
 # Fill rows across thin traced bands (outlines, shading edges) otherwise sew as hundreds of
 # sub-millimetre stitches. Measured on the wombat sample: 15.6k -> 9.8k stitches, same look.
 MIN_FILL_STITCH_MM = 0.8
+# Ink/Stitch 3.2.2 can't fit its meander pattern (100% scale) into a circle under 7 mm across and
+# then fails the whole design. Measured on circles; 8 mm leaves a margin.
+MEANDER_MIN_MM = 8.0
+
+
+def widest_circle_mm(d: str, mm_per_px: float, res_mm: float = 0.25) -> float:
+    """Diameter of the largest circle inside the path (holes cut out), drawn on a res_mm grid.
+
+    ponytail: curves are cut to their end points, fine for a size check, not for drawing.
+    """
+    rings, ring = [], []
+    for command, numbers in re.findall(r"([MLCZ])([^MLCZ]*)", d):
+        values = [float(n) for n in re.findall(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", numbers)]
+        if command == "M" and ring:
+            rings.append(ring)
+            ring = []
+        if len(values) >= 2:
+            ring.append(values[-2:])
+        if command == "Z" and ring:
+            rings.append(ring)
+            ring = []
+    if ring:
+        rings.append(ring)
+    rings = [np.array(r) * mm_per_px for r in rings if len(r) >= 3]
+    if not rings:
+        return 0.0
+    low = np.min([r.min(axis=0) for r in rings], axis=0) - 1
+    high = np.max([r.max(axis=0) for r in rings], axis=0) + 1
+    mask = np.zeros((int((high[1] - low[1]) / res_mm) + 1, int((high[0] - low[0]) / res_mm) + 1), np.uint8)
+    cv2.fillPoly(mask, [np.round((r - low) / res_mm).astype(np.int32) for r in rings], 1)
+    # fillPoly also fills the outline pixels, so each width reads about 2 pixels too wide
+    return max(0.0, float(cv2.distanceTransform(mask, cv2.DIST_L2, 5).max()) * 2 - 2) * res_mm
 
 
 def spans_canvas(
@@ -171,6 +205,10 @@ def tag_svg(
             p.set(f"{{{INKSTITCH_NS}}}min_stitch_length_mm", str(MIN_FILL_STITCH_MM))
             for name, value in (fill_params or {}).items():
                 p.set(f"{{{INKSTITCH_NS}}}{name}", value)
+            # Too small for the squiggle: plain rows here look the same and keep the design sewable
+            if (p.get(f"{{{INKSTITCH_NS}}}fill_method") == "meander_fill"
+                    and widest_circle_mm(p.get("d", ""), w_mm / w_px) < MEANDER_MIN_MM):
+                p.set(f"{{{INKSTITCH_NS}}}fill_method", "auto_fill")
 
     if non_overlapping:
         colour = lambda p: p.get("stroke") if p.get("fill") == "none" else p.get("fill")

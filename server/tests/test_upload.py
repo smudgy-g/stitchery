@@ -24,7 +24,7 @@ class UploadTests(unittest.TestCase):
         """Runs the client's two steps: /colours, then /stitch with the stitched colours in order."""
         data = io.BytesIO()
         image.save(data, "PNG")
-        colours = self.client.post(f"/colours?num_colors={num_colors}", files={"file": ("design.png", data.getvalue(), "image/png")})
+        colours = self.client.post(f"/api/colours?num_colors={num_colors}", files={"file": ("design.png", data.getvalue(), "image/png")})
         self.assertEqual(colours.status_code, 200, colours.text)
         body = colours.json()
         # The client paints colours it won't stitch transparent
@@ -35,7 +35,7 @@ class UploadTests(unittest.TestCase):
         flat.save(data, "PNG")
         ids = "".join(f"&thread={c['thread']['id']}" for c in body["colours"] if c["stitched"])
         return self.client.post(
-            f"/stitch?target_width_mm={width_mm}&machine_key={machine_key}{ids}{extra}",
+            f"/api/stitch?target_width_mm={width_mm}&machine_key={machine_key}{ids}{extra}",
             files={"file": ("design.png", data.getvalue(), "image/png")},
         )
 
@@ -81,26 +81,6 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(len(blue), 1)
         self.assertGreaterEqual(blue[0].get("d").count("M"), 2, "blue fill should have a hole where the red sits")
 
-    def test_dev_cors_allows_vite_port_change(self):
-        response = self.client.options(
-            "/stitch",
-            headers={
-                "Origin": "http://localhost:5175",
-                "Access-Control-Request-Method": "POST",
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5175")
-
-        response = self.client.options(
-            "/stitch",
-            headers={
-                "Origin": "https://untrusted.example",
-                "Access-Control-Request-Method": "POST",
-            },
-        )
-        self.assertEqual(response.status_code, 400)
-
     def test_rejects_invalid_and_empty_pes(self):
         empty = io.BytesIO()
         pystitch.write_pes(pystitch.EmbPattern(), empty)
@@ -138,13 +118,13 @@ class UploadTests(unittest.TestCase):
         Image.new("RGBA", (40, 40), "red").save(data, "PNG")
         for query in ["thread=Nope:1", "thread=Brother:1&outline_thread=Nope:1"]:
             with self.subTest(query=query):
-                response = self.client.post(f"/stitch?{query}", files={"file": ("d.png", data.getvalue(), "image/png")})
+                response = self.client.post(f"/api/stitch?{query}", files={"file": ("d.png", data.getvalue(), "image/png")})
                 self.assertEqual(response.status_code, 400, response.text)
 
     def test_transparent_picture_has_nothing_to_stitch(self):
         data = io.BytesIO()
         Image.new("RGBA", (40, 40)).save(data, "PNG")
-        response = self.client.post("/colours", files={"file": ("d.png", data.getvalue(), "image/png")})
+        response = self.client.post("/api/colours", files={"file": ("d.png", data.getvalue(), "image/png")})
         self.assertEqual(response.status_code, 400)
 
     def test_remove_background_returns_png(self):
@@ -152,12 +132,12 @@ class UploadTests(unittest.TestCase):
         Image.new("RGB", (40, 40), "red").save(data, "PNG")
         cutout = Image.new("RGBA", (40, 40))
         with patch("app.main.remove_background", return_value=cutout):
-            response = self.client.post("/remove-background", files={"file": ("d.png", data.getvalue(), "image/png")})
+            response = self.client.post("/api/remove-background", files={"file": ("d.png", data.getvalue(), "image/png")})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Image.open(io.BytesIO(response.content)).mode, "RGBA")
 
     def test_machines_lists_presets(self):
-        response = self.client.get("/machines")
+        response = self.client.get("/api/machines")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["janome_sq14"]["format"], "jef")
 
@@ -176,3 +156,20 @@ class UploadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SiteFilesTests(unittest.TestCase):
+    def test_client_pages_fall_back_to_index_but_api_does_not(self):
+        import tempfile
+        from starlette.applications import Starlette
+        from app.main import SiteFiles
+
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, "index.html").write_text("app")
+            Path(root, "logo.svg").write_text("svg")
+            site = Starlette()
+            site.mount("/", SiteFiles(directory=root, html=True))
+            client = TestClient(site)
+            self.assertEqual(client.get("/logo.svg").text, "svg")
+            self.assertEqual(client.get("/designs").text, "app")
+            self.assertEqual(client.get("/api/nope").status_code, 404)

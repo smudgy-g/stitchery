@@ -1,14 +1,15 @@
 # Runs on the Droplet from /srv/stitchery. IMAGE_TAG is set by the deploy workflow.
 services:
-  api:
-    image: ghcr.io/smudgy-g/stitchery-api:${IMAGE_TAG:-latest}
+  app:
+    image: ghcr.io/smudgy-g/stitchery:${IMAGE_TAG:-latest}
     restart: unless-stopped
     # not published: only Caddy talks to it
 
-  web:
-    image: ghcr.io/smudgy-g/stitchery-web:${IMAGE_TAG:-latest}
+  # Only for HTTPS on the Droplet; hosts with their own HTTPS run the app image alone
+  caddy:
+    image: caddy:2-alpine
     restart: unless-stopped
-    depends_on: [api]
+    depends_on: [app]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-stitchery.adamgriff.dev}
     ports:
@@ -16,6 +17,7 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data # TLS certificates; losing these re-issues and can hit Let's Encrypt rate limits
       - caddy_config:/config
 

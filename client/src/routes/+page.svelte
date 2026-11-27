@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { beforeNavigate, goto } from "$app/navigation";
   import {
-    ArrowDown, ArrowUp, ArrowUpRight, Crop, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Image as ImageIcon, ImagePlus,
+    ArrowDown, ArrowUp, ArrowUpRight, BookmarkCheck, BookmarkPlus, CircleUserRound, Crop, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Image as ImageIcon, ImagePlus, LoaderCircle,
     ListOrdered, Maximize, Palette, Pencil, Printer, RefreshCw, RotateCcw, RotateCw, Spool, Undo2, WandSparkles, ZoomIn, ZoomOut,
   } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
@@ -11,12 +12,14 @@
   import * as NativeSelect from "$lib/components/ui/native-select";
   import { Slider } from "$lib/components/ui/slider";
   import * as ToggleGroup from "$lib/components/ui/toggle-group";
+  import AccountDialog from "$lib/AccountDialog.svelte";
+  import { account, accountToken } from "$lib/account.svelte";
   import HoopFrame from "$lib/HoopFrame.svelte";
   import PictureEditor from "$lib/PictureEditor.svelte";
   import StitchPreview from "$lib/StitchPreview.svelte";
   import ThreadPicker from "$lib/ThreadPicker.svelte";
   import {
-    getMachines, getThreads, inches, makeColours, makeStitches, removeBackground, saveFile,
+    getMachines, getThreads, inches, makeColours, makeStitches, removeBackground, saveDesign, saveFile,
     type Design, type FillMethod, type Machine, type StitchSettings, type Thread,
   } from "$lib/api";
   import { loadColours, paint, toPng, type Swatch } from "$lib/colours";
@@ -82,6 +85,15 @@
   let request = 0;
   let fileInput: HTMLInputElement;
   let colourCanvas = $state<HTMLCanvasElement>();
+  let accountDialog: AccountDialog;
+  /** The stitches last saved to the account, so the button can say they're saved */
+  let savedKey = $state("");
+  let savingDesign = $state(false);
+
+  // The picture and settings live only on this page, so leaving it loses them, unless the design is saved to the account
+  beforeNavigate((nav) => {
+    if (picture && savedKey !== stitchKey && nav.type !== "leave" && nav.to?.route.id !== nav.from?.route.id && !confirm("Leave this design? Your picture and settings won’t be kept.")) nav.cancel();
+  });
 
   onMount(() => {
     getMachines().then((m) => (machines = m)).catch(() => (loadError = true));
@@ -235,6 +247,24 @@
     editing = null;
   }
 
+  async function saveToAccount() {
+    if (!design || !stitchesFresh) return;
+    if (!account.user) return accountDialog.show(saveToAccount);
+    const key = stitchKey;
+    savingDesign = true;
+    error = "";
+    try {
+      await saveDesign(await accountToken(), {
+        name: (name.trim() || "design").slice(0, 80), machine_key: machineKey, file_base64: design.file_base64, threads: design.threads.map((t) => t.id),
+      });
+      savedKey = key;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    } finally {
+      savingDesign = false;
+    }
+  }
+
   function save() {
     if (design && stitchesFresh) saveFile(design.file_base64, fileName);
     else tab = "stitches";
@@ -258,6 +288,23 @@
   </div>
 {/snippet}
 
+<!-- Names the saved file: the extension shows next to it so that's clear -->
+{#snippet nameField(cls: string)}
+  <label class="flex h-10 items-center gap-2 rounded-full bg-secondary px-4 focus-within:ring-3 focus-within:ring-ring/50 {cls}" title="The name of the file you save">
+    <Pencil aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+    <input bind:value={name} placeholder="Name your design" aria-label="File name" class="min-w-[3ch] flex-1 bg-transparent outline-none placeholder:text-muted-foreground [field-sizing:content]" />
+    <span class="-ml-2 text-muted-foreground">.{fileName.split(".").pop()}</span>
+  </label>
+{/snippet}
+
+{#snippet machineField(cls: string)}
+  <NativeSelect.Root bind:value={machineKey} onchange={changeMachine} disabled={!machines} aria-label="Machine and hoop" class="{cls} [&>select]:h-10 [&>select]:border-transparent [&>select]:bg-secondary [&>select]:pl-4">
+    {#each Object.entries(machines ?? {}) as [key, m] (key)}
+      <NativeSelect.Option value={key}>{m.name} · {m.max_w}×{m.max_h} mm</NativeSelect.Option>
+    {/each}
+  </NativeSelect.Root>
+{/snippet}
+
 {#snippet stat(label: string, value: string)}
   <div class="flex items-baseline gap-1.5"><dt class="text-muted-foreground">{label}</dt><dd class="font-semibold tabular-nums">{value}</dd></div>
 {/snippet}
@@ -269,23 +316,23 @@
   <!-- Toolbar -->
   <header class="flex flex-wrap items-center gap-2 px-3 py-3 sm:gap-3 sm:px-5 print:hidden">
     <a href="/" class="display mr-2 text-3xl text-vermilion-500" aria-label="Stitchery home">Stitchery</a>
-    <!-- Names the saved file: the extension shows next to it so that's clear -->
-    <label class="hidden h-10 max-w-64 items-center gap-2 rounded-full bg-secondary px-4 focus-within:ring-3 focus-within:ring-ring/50 md:flex" title="The name of the file you save">
-      <Pencil aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
-      <input bind:value={name} placeholder="Name your design" aria-label="File name" class="min-w-[3ch] flex-1 bg-transparent outline-none placeholder:text-muted-foreground [field-sizing:content]" />
-      <span class="-ml-2 text-muted-foreground">.{fileName.split(".").pop()}</span>
-    </label>
-    <div class="ml-auto flex items-center gap-2">
-      <NativeSelect.Root bind:value={machineKey} onchange={changeMachine} disabled={!machines} aria-label="Machine and hoop" class="max-w-[52vw] [&>select]:h-10 [&>select]:border-transparent [&>select]:bg-secondary [&>select]:pl-4">
-        {#each Object.entries(machines ?? {}) as [key, m] (key)}
-          <NativeSelect.Option value={key}>{m.name} · {m.max_w}×{m.max_h} mm</NativeSelect.Option>
-        {/each}
-      </NativeSelect.Root>
-      <Button onclick={save} disabled={!picture || busy !== ""} class="h-10 gap-3 pr-1 pl-5">
-        {stitchesFresh ? "Save file" : "Make file"}
-        <span class="flex size-8 items-center justify-center rounded-full bg-vermilion-500 text-black"><ArrowUpRight aria-hidden="true" class="size-4" /></span>
-      </Button>
+    <div class="hidden md:contents">
+      {@render nameField("max-w-64")}
+      <div class="ml-auto">{@render machineField("max-w-[40vw]")}</div>
     </div>
+    <Button href={account.user ? "/designs" : undefined} onclick={() => { if (!account.user) accountDialog.show(() => goto("/designs")); }}
+      class="ml-auto h-10 gap-3 pr-1 pl-5 md:ml-0">
+      {account.user ? "My designs" : "Sign in"}
+      <span class="flex size-8 items-center justify-center rounded-full bg-vermilion-500 text-black"><CircleUserRound aria-hidden="true" class="size-4" /></span>
+    </Button>
+    <!-- Phones: the name and machine fold away under one line, like "More settings" -->
+    <details class="w-full rounded-2xl bg-card px-4 py-3 md:hidden [&[open]>summary]:mb-3">
+      <summary class="cursor-pointer truncate font-semibold">{fileName} <span class="font-normal text-muted-foreground">· {machine?.name ?? "Machine"}</span></summary>
+      <div class="space-y-2">
+        {@render nameField("w-full")}
+        {@render machineField("w-full")}
+      </div>
+    </details>
   </header>
 
   <div class="grid min-h-0 grid-cols-1 grid-rows-[60svh_auto_auto] gap-3 px-3 pb-3 sm:px-5 lg:grid-cols-[5.5rem_minmax(0,1fr)_24rem] lg:grid-rows-1 print:block">
@@ -333,7 +380,7 @@
           </div>
         {/if}
       {/if}
-      <div class="absolute top-3 right-3 flex items-center gap-0.5 rounded-full bg-secondary p-0.5 print:hidden">
+      <div class="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-full bg-secondary p-0.5 print:hidden">
         <Button variant="ghost" size="icon-sm" class="rounded-full" aria-label="Zoom out" disabled={zoom === ZOOMS[0]}
           onclick={() => (zoom = ZOOMS[ZOOMS.indexOf(zoom) - 1])}><ZoomOut aria-hidden="true" /></Button>
         <button type="button" class="w-11 text-sm font-medium tabular-nums" title="Fit the hoop" onclick={() => (zoom = 1)}>{zoom * 100}%</button>
@@ -519,7 +566,7 @@
             {/if}
           </section>
 
-          <details class="group space-y-4 rounded-2xl bg-paper-100 p-4 [&[open]>summary]:mb-4">
+          <details class="group rounded-2xl bg-paper-100 p-4 [&[open]>summary]:mb-4">
             <summary class="cursor-pointer font-semibold">More settings</summary>
             <div class="space-y-5">
               {@render slider("spacing", "Gap between rows", settings.row_spacing_mm, 0.15, 0.8, 0.01, " mm", (v) => { settings.row_spacing_mm = v; fabric = "custom"; })}
@@ -559,6 +606,9 @@
           </ol>
           <div class="flex flex-wrap gap-2 print:hidden">
             <Button disabled={!stitchesFresh} onclick={save}>Save file for my {brandName} machine</Button>
+            <Button variant="outline" disabled={!stitchesFresh || savingDesign || savedKey === stitchKey} onclick={saveToAccount}>
+              {#if savedKey === stitchKey}<BookmarkCheck aria-hidden="true" /> Saved to my designs{:else if savingDesign}<LoaderCircle aria-hidden="true" class="animate-spin" /> Saving…{:else}<BookmarkPlus aria-hidden="true" /> Save to my designs{/if}
+            </Button>
             <Button variant="outline" onclick={() => window.print()}><Printer aria-hidden="true" /> Print</Button>
           </div>
         </div>
@@ -587,3 +637,5 @@
     {/if}
   </footer>
 </div>
+
+<AccountDialog bind:this={accountDialog} />

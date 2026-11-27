@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.preprocess import majority_filter, quantize_for_embroidery, remove_background
 
@@ -52,6 +52,15 @@ class PreprocessTests(unittest.TestCase):
         _, colours = quantize_for_embroidery(img, num_colors=2)
         white = [c for c in colours if sum(c["thread"]["rgb"]) > 700]
         self.assertEqual([c["stitched"] for c in white], [False])
+
+    def test_outline_of_a_cut_out_subject_is_not_background(self):
+        # Background already removed: the outline wraps the subject's edge but must stay stitched
+        img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.polygon([(10, 10), (70, 10), (40, 40), (70, 70), (10, 70)], fill=(40, 20, 10, 255))
+        draw.polygon([(14, 14), (62, 14), (35, 40), (62, 66), (14, 66)], fill=(200, 0, 0, 255))
+        _, colours = quantize_for_embroidery(img, num_colors=2, smoothing=0)
+        self.assertEqual([c["stitched"] for c in colours], [True, True])
 
     def test_remove_background_cuts_out_subject_with_hard_edges(self):
         # A half-transparent red rim would blend into a halo colour that takes a thread of its own.

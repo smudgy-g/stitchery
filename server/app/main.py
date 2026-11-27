@@ -4,48 +4,55 @@ import logging
 import math
 import subprocess
 import threading
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 import pystitch
 from pystitch.EmbConstant import STITCH
 import vtracer
-from fastapi import FastAPI, HTTPException, Query, Response, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from PIL import Image, UnidentifiedImageError
 
-from app.preprocess import get_thread_catalog, quantize_for_embroidery, remove_background
+from app import accounts
+from app.machines import MACHINES
+from app.preprocess import get_thread_catalog, nearest_thread, quantize_for_embroidery, remove_background
 from app.stitcher import svg_to_pes
 from app.tagging import tag_svg
 
 logger = logging.getLogger(__name__)
 
-# Hoop limits are width x height as the hoop is mounted; designs are not auto-rotated.
-MACHINES = {
-    "brother_4x4": {"name": "Brother 4x4", "max_w": 100.0, "max_h": 100.0, "format": "pes"},
-    "brother_5x7": {"name": "Brother 5x7", "max_w": 130.0, "max_h": 180.0, "format": "pes"},
-    "brother_6x10": {"name": "Brother 6x10", "max_w": 160.0, "max_h": 260.0, "format": "pes"},
-    "brother_8x12": {"name": "Brother 8x12", "max_w": 200.0, "max_h": 300.0, "format": "pes"},
-    "janome_sq14": {"name": "Janome SQ14", "max_w": 140.0, "max_h": 140.0, "format": "jef"},
-    "janome_re20": {"name": "Janome RE20", "max_w": 170.0, "max_h": 200.0, "format": "jef"},
-    "husqvarna_240x150": {"name": "Husqvarna Viking 240x150", "max_w": 240.0, "max_h": 150.0, "format": "vp3"},
-    "bernina_medium": {"name": "Bernina Medium", "max_w": 100.0, "max_h": 130.0, "format": "exp"},
-    "bernina_large_oval": {"name": "Bernina Large Oval", "max_w": 145.0, "max_h": 255.0, "format": "exp"},
-    "tajima_dst": {"name": "Tajima / commercial (DST)", "max_w": 200.0, "max_h": 300.0, "format": "dst"},
-}
 MM_PER_PX = 0.1  # finer than any stitch can resolve
 GENERATION_LOCK = threading.Lock()
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+# The built web app; the Docker image puts it here so one server runs the whole site
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    accounts.open_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+# Everything the client calls lives under /api; the web app has the rest of the site
+api = APIRouter(prefix="/api")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# ponytail: trusts Content-Length; a chunked upload skips it. Put a proxy limit in front if that matters.
+@app.middleware("http")
+async def limit_upload(request, call_next):
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"detail": "That picture is too big. Please use one under 20 MB."}, status_code=413)
+    return await call_next(request)
 
 
 # Corners of the RGB cube: the one furthest from every thread marks "not stitched" for tracing
@@ -70,22 +77,17 @@ def png_base64(img: Image.Image) -> bytes:
     return base64.b64encode(buf.getvalue())
 
 
-@app.get("/")
-async def root():
-    return {"message": "Hello from server!"}
-
-
-@app.get("/machines")
+@api.get("/machines")
 def machines():
     return MACHINES
 
 
-@app.get("/threads")
+@api.get("/threads")
 def threads():
     return get_thread_catalog()[0]
 
 
-@app.post("/remove-background")
+@api.post("/remove-background")
 def remove_background_endpoint(file: UploadFile):
     img = open_image(file)
     img.thumbnail((1600, 1600))  # bounds the model's memory; more than any hoop can use
@@ -97,7 +99,7 @@ def remove_background_endpoint(file: UploadFile):
     return Response(buf.getvalue(), media_type="image/png")
 
 
-@app.post("/colours")
+@api.post("/colours")
 def colours(
     file: UploadFile,
     num_colors: int = Query(default=5, ge=2, le=12, description="Target thread colour count"),
@@ -112,7 +114,7 @@ def colours(
     return {"image": png_base64(flat), "colours": used}
 
 
-@app.post("/stitch")
+@api.post("/stitch")
 def stitch(
     file: UploadFile,
     thread: list[str] = Query(description="Thread ids to stitch, in sewing order"),
@@ -226,9 +228,7 @@ def stitch(
         min_x, min_y, max_x, max_y = pattern.bounds()
 
         for stitches, emb_thread in pattern.get_as_colorblocks():
-            # PES v1 stores palette colours, not our thread, so name each block by the nearest thread used
-            rgb = (emb_thread.get_red(), emb_thread.get_green(), emb_thread.get_blue())
-            nearest = min(used_threads, key=lambda t: sum((a - b) ** 2 for a, b in zip(t["rgb"], rgb)))
+            nearest = nearest_thread((emb_thread.get_red(), emb_thread.get_green(), emb_thread.get_blue()), used_threads)
             blocks.append({"color": emb_thread.hex_color(), "stitches": stitches, "thread": nearest})
 
         return {
@@ -245,3 +245,21 @@ def stitch(
             "format": hoop["format"],
             "threads": used_threads,
         }
+
+
+app.include_router(api)
+app.include_router(accounts.router)
+class SiteFiles(StaticFiles):
+    """The built client. Its pages (like /designs) exist only in the browser, so unknown paths get index.html."""
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or path.startswith("api/"):
+                raise
+            return await super().get_response("index.html", scope)
+
+
+if STATIC_DIR.is_dir():
+    app.mount("/", SiteFiles(directory=STATIC_DIR, html=True), name="site")
