@@ -11,7 +11,7 @@
   "sandbox": {
     "kit": "shell",
     "cpus": 2,
-    "memory": "2g",
+    "memory": "6g",
     "allowlist": [
       "nodejs.org",
       "registry.npmjs.org",
@@ -23,6 +23,7 @@
     ],
     "maxConcurrent": 1
   },
+  "acceptance": { "assets": ".factory/assets" },
   "commands": {
     "changedCode": ["**/*"],
     "setup": [["bash", ".factory/sandbox-setup.sh"]],
